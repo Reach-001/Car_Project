@@ -15,9 +15,11 @@ typedef enum
 
 void BspBuzzer_Init(void);
 void BspBuzzer_Set(bool on);
+void BspBuzzer_SetFrequency(uint16_t frequency_hz);
 void BspBuzzer_Beep(uint16_t on_ms);
 void BspBuzzer_Play(BuzzerPattern pattern);
 void BspBuzzer_Task10ms(void);
+void BspBuzzer_IrqHandler(void);
 bool BspBuzzer_IsActive(void);
 
 #endif

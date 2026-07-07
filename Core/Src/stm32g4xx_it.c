@@ -22,6 +22,7 @@
 #include "stm32g4xx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "bsp_buzzer.h"
 #include "ultrasonic.h"
 /* USER CODE END Includes */
 
@@ -203,6 +204,11 @@ void SysTick_Handler(void)
 void EXTI15_10_IRQHandler(void)
 {
   HAL_GPIO_EXTI_IRQHandler(HCSR04_ECHO_Pin);
+}
+
+void TIM7_IRQHandler(void)
+{
+  BspBuzzer_IrqHandler();
 }
 
 /* USER CODE END 1 */
