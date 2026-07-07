@@ -47,8 +47,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     App/Src/app_main.c
     App/Src/app_tasks.c
+    BSP/Src/bsp_buzzer.c
     BSP/Src/bsp_encoder.c
     BSP/Src/bsp_io.c
+    BSP/Src/bsp_key.c
     BSP/Src/bsp_motor.c
     BSP/Src/bsp_servo.c
     Modules/Src/app_mode.c
@@ -56,6 +58,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/Src/chassis.c
     Modules/Src/k230_link.c
     Modules/Src/protocol.c
+    Modules/Src/tracker.c
+    Modules/Src/ultrasonic.c
     Service/Src/scheduler.c
 )
 

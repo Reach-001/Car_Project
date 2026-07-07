@@ -1,11 +1,15 @@
 #include "app_tasks.h"
 
 #include "app_mode.h"
+#include "bsp_buzzer.h"
 #include "bsp_io.h"
+#include "bsp_key.h"
 #include "bt_link.h"
 #include "chassis.h"
 #include "k230_link.h"
 #include "scheduler.h"
+#include "tracker.h"
+#include "ultrasonic.h"
 
 static void Task_Chassis10ms(void *context)
 {
@@ -13,12 +17,20 @@ static void Task_Chassis10ms(void *context)
     Chassis_Task10ms();
 }
 
+static void Task_Peripheral10ms(void *context)
+{
+    (void)context;
+    BspKey_Task10ms();
+    BspBuzzer_Task10ms();
+    Tracker_Task10ms();
+    Ultrasonic_Task10ms();
+}
+
 static void Task_Input20ms(void *context)
 {
     (void)context;
-    BspKeyState keys = BspIo_ReadKeys();
 
-    if (keys.key1)
+    if (BspKey_TakeClickedEvent(BSP_KEY_1))
     {
         Chassis_Stop();
     }
@@ -61,6 +73,7 @@ static void Task_Heartbeat500ms(void *context)
 
 void AppTasks_Register(void)
 {
+    (void)Scheduler_AddTask("peripheral", Task_Peripheral10ms, 0, 10U, 0U);
     (void)Scheduler_AddTask("chassis", Task_Chassis10ms, 0, 10U, 0U);
     (void)Scheduler_AddTask("comm", Task_Communication10ms, 0, 10U, 1U);
     (void)Scheduler_AddTask("mode", Task_Mode20ms, 0, 20U, 3U);
