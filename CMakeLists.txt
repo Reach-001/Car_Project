@@ -51,7 +51,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/Src/bsp_io.c
     BSP/Src/bsp_motor.c
     BSP/Src/bsp_servo.c
+    Modules/Src/app_mode.c
+    Modules/Src/bt_link.c
     Modules/Src/chassis.c
+    Modules/Src/k230_link.c
+    Modules/Src/protocol.c
     Service/Src/scheduler.c
 )
 
