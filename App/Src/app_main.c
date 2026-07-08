@@ -4,10 +4,11 @@
 #include "app_mode.h"
 #include "bsp_buzzer.h"
 #include "bsp_encoder.h"
-#include "bsp_io.h"
+#include "bsp_led.h"
 #include "bsp_key.h"
 #include "bsp_motor.h"
 #include "bsp_servo.h"
+#include "bsp_uart.h"
 #include "bt_link.h"
 #include "chassis.h"
 #include "k230_link.h"
@@ -19,7 +20,7 @@
 
 void App_Init(void)
 {
-    BspIo_Init();
+    BspLed_Init();
     BspBuzzer_Init();
     BspKey_Init();
     BspMotor_Init();
@@ -31,6 +32,9 @@ void App_Init(void)
     K230Link_Init();
     BtLink_Init();
     AppMode_Init();
+
+    BspUart_Init(BSP_UART_K230);
+    BspUart_Init(BSP_UART_BT);
 
     Scheduler_Init();
     AppTasks_Register();

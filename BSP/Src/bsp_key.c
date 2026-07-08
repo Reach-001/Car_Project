@@ -19,9 +19,9 @@ typedef struct
 } KeyContext;
 
 static KeyContext s_keys[BSP_KEY_COUNT] = {
-    {KEY1_GPIO_Port, KEY1_Pin, true, false, false, 0U, 0U, {0}},
-    {KEY2_GPIO_Port, KEY2_Pin, true, false, false, 0U, 0U, {0}},
-    {KEY3_GPIO_Port, KEY3_Pin, true, false, false, 0U, 0U, {0}},
+    {KEY1_GPIO_Port, KEY1_Pin, false, false, false, 0U, 0U, {0}},
+    {KEY2_GPIO_Port, KEY2_Pin, false, false, false, 0U, 0U, {0}},
+    {KEY3_GPIO_Port, KEY3_Pin, false, false, false, 0U, 0U, {0}},
 };
 
 static bool read_key_raw(const KeyContext *key)

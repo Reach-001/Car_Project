@@ -1,6 +1,6 @@
 #include "tracker.h"
 
-#include "bsp_io.h"
+#include "bsp_gpio_sensor.h"
 
 static TrackerState s_state;
 static bool s_active_high = true;
@@ -22,7 +22,7 @@ void Tracker_SetActiveHigh(bool active_high)
 void Tracker_Task10ms(void)
 {
     static const int16_t weights[5] = {-2000, -1000, 0, 1000, 2000};
-    BspTrackState raw = BspIo_ReadTrack();
+    BspTrackRaw raw = BspGpioSensor_ReadTrack();
     int32_t weighted_sum = 0;
     uint8_t active_count = 0U;
     uint8_t bits = 0U;

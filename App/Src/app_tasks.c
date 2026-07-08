@@ -2,8 +2,9 @@
 
 #include "app_mode.h"
 #include "bsp_buzzer.h"
-#include "bsp_io.h"
 #include "bsp_key.h"
+#include "bsp_led.h"
+#include "iwdg.h"
 #include "bt_link.h"
 #include "chassis.h"
 #include "k230_link.h"
@@ -68,7 +69,8 @@ static void Task_Heartbeat500ms(void *context)
     (void)context;
 
     led_on = !led_on;
-    BspIo_SetStateLed(led_on);
+    BspLed_SetStateLed(led_on);
+    HAL_IWDG_Refresh(&hiwdg);
 }
 
 void AppTasks_Register(void)

@@ -49,10 +49,12 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     App/Src/app_tasks.c
     BSP/Src/bsp_buzzer.c
     BSP/Src/bsp_encoder.c
-    BSP/Src/bsp_io.c
+    BSP/Src/bsp_gpio_sensor.c
     BSP/Src/bsp_key.c
+    BSP/Src/bsp_led.c
     BSP/Src/bsp_motor.c
     BSP/Src/bsp_servo.c
+    BSP/Src/bsp_uart.c
     Modules/Src/app_mode.c
     Modules/Src/bt_link.c
     Modules/Src/chassis.c
@@ -60,6 +62,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Modules/Src/protocol.c
     Modules/Src/tracker.c
     Modules/Src/ultrasonic.c
+    Service/Src/ring_buffer.c
     Service/Src/scheduler.c
 )
 

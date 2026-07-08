@@ -24,6 +24,7 @@
 /* USER CODE BEGIN Includes */
 #include "bsp_buzzer.h"
 #include "ultrasonic.h"
+#include "bsp_uart.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -57,6 +58,7 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern TIM_HandleTypeDef htim6;
 extern DMA_HandleTypeDef hdma_usart2_rx;
 extern DMA_HandleTypeDef hdma_usart2_tx;
 extern DMA_HandleTypeDef hdma_usart3_rx;
@@ -259,6 +261,20 @@ void DMA1_Channel4_IRQHandler(void)
   /* USER CODE END DMA1_Channel4_IRQn 1 */
 }
 
+/**
+  * @brief This function handles TIM6 global interrupt, DAC1 and DAC3 channel underrun error interrupts.
+  */
+void TIM6_DAC_IRQHandler(void)
+{
+  /* USER CODE BEGIN TIM6_DAC_IRQn 0 */
+
+  /* USER CODE END TIM6_DAC_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim6);
+  /* USER CODE BEGIN TIM6_DAC_IRQn 1 */
+
+  /* USER CODE END TIM6_DAC_IRQn 1 */
+}
+
 /* USER CODE BEGIN 1 */
 void EXTI15_10_IRQHandler(void)
 {
@@ -268,6 +284,16 @@ void EXTI15_10_IRQHandler(void)
 void TIM7_IRQHandler(void)
 {
   BspBuzzer_IrqHandler();
+}
+
+void USART2_IRQHandler(void)
+{
+  BspUart_RxIsrHook(BSP_UART_K230);
+}
+
+void USART3_IRQHandler(void)
+{
+  BspUart_RxIsrHook(BSP_UART_BT);
 }
 
 /* USER CODE END 1 */
