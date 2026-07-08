@@ -4,43 +4,62 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* ── board-level UART driver (platform-abstracted header) ──
+/* ────────────────────────────────────────────────────────────
+ * UART 通信驱动（DMA 收发）—— 硬件抽象层头文件
  *
- * Each UART is backed by a static RingBuffer for RX.
- * ISR pushes bytes; task pops them.
+ * 接收：DMA 循环模式，256 字节循环缓冲
+ *       HAL_UART_Receive_DMA 启动一次，持续后台收。
+ *       HT（半满）/ TC（全满）中断 → 拷贝到 RingBuffer
+ *       Task 侧通过 ReadByte / Available 从 RingBuffer 读。
  *
- * Wiring checklist for the user:
- *   1. Call BspUart_Init() after CubeMX MX_USARTx_UART_Init().
- *   2. Enable USART_RXNE interrupt: __HAL_UART_ENABLE_IT(&huartx, UART_IT_RXNE).
- *   3. In USARTx_IRQHandler, call BspUart_RxIsrHook(id).
- *   4. In the comm task, call BspUart_ReadByte() / BspUart_Available().
- */
+ * 发送：DMA 异步，单缓冲
+ *       WriteBuffer 启动 DMA 发送立即返回
+ *       TxDone 查询是否发送完毕
+ *       WriteString 内部用 WriteBuffer（等上次发完才启动）
+ *
+ * 硬件映射：
+ *   BSP_UART_K230 = USART2  DMA1_CH1(RX) DMA1_CH2(TX)
+ *   BSP_UART_BT   = USART3  DMA1_CH3(RX) DMA1_CH4(TX)
+ * ──────────────────────────────────────────────────────────── */
 
 typedef enum
 {
-    BSP_UART_K230 = 0,   /* USART2,  PA2 TX  PA3 RX */
-    BSP_UART_BT           /* USART3, PC10 TX PC11 RX */
+    BSP_UART_K230 = 0,   /* USART2 — K230 视觉模块 */
+    BSP_UART_BT           /* USART3 — 蓝牙遥控器   */
 } BspUartId;
 
 #define BSP_UART_COUNT 2
 
-/* ── lifecycle ── */
+/* ── 初始化 ── */
 
+/** 初始化 DMA 接收：启动 HAL_UART_Receive_DMA 循环模式
+ *  调用时机：CubeMX 初始化 USART + DMA 之后 */
 void BspUart_Init(BspUartId id);
 
-/* ── task-side RX (non-blocking) ── */
+/* ── 接收（非阻塞，Task 侧调用，从 RingBuffer 读） ── */
 
 bool     BspUart_ReadByte(BspUartId id, uint8_t *byte);
 uint16_t BspUart_Available(BspUartId id);
 
-/* ── task-side TX (blocking, short strings / debug only) ── */
+/* ── 发送（DMA 异步，立即返回） ── */
 
-void BspUart_WriteByte(BspUartId id, uint8_t byte);
+/** 启动 DMA 发送，数据指针和长度由调用方保证生命周期
+ *  @return true = DMA 已启动；false = 上一次发送未完成 */
+bool BspUart_WriteBuffer(BspUartId id, const uint8_t *data, uint16_t len);
+
+/** 上一次 WriteBuffer 是否已完成（可发起下一次发送） */
+bool BspUart_TxDone(BspUartId id);
+
+/** 发送字符串（阻塞直到空闲）
+ *  内部调用 WriteBuffer，等待空闲。仅用于短数据 / 调试输出 */
 void BspUart_WriteString(BspUartId id, const char *str);
 
-/* ── ISR hook ──
- * Call from USARTx_IRQHandler. Reads RDR + clears RXNE, pushes to ring buffer. */
+/* ── DMA 接收管理（由 HAL 回调调用，用户不直接调） ── */
 
-void BspUart_RxIsrHook(BspUartId id);
+/** DMA 循环缓冲半满时 HAL 回调调用，把上半部数据搬到 RingBuffer */
+void BspUart_DmaRxHalfCplt(BspUartId id);
+
+/** DMA 循环缓冲全满时 HAL 回调调用，把下半部数据搬到 RingBuffer */
+void BspUart_DmaRxFullCplt(BspUartId id);
 
 #endif /* BSP_UART_H */
