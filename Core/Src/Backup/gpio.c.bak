@@ -57,7 +57,7 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOC, LED3_Pin|STATE_LED_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, HCSR04_TRIG_Pin|Buzzer_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(HCSR04_TRIG_GPIO_Port, HCSR04_TRIG_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : LED1_Pin LED2_Pin */
   GPIO_InitStruct.Pin = LED1_Pin|LED2_Pin;
@@ -73,12 +73,12 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED3_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : HCSR04_TRIG_Pin Buzzer_Pin */
-  GPIO_InitStruct.Pin = HCSR04_TRIG_Pin|Buzzer_Pin;
+  /*Configure GPIO pin : HCSR04_TRIG_Pin */
+  GPIO_InitStruct.Pin = HCSR04_TRIG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  HAL_GPIO_Init(HCSR04_TRIG_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : HCSR04_ECHO_Pin */
   GPIO_InitStruct.Pin = HCSR04_ECHO_Pin;
@@ -106,16 +106,6 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-
-  /* USER CODE BEGIN MX_GPIO_Init 2 */
-  GPIO_InitStruct.Pin = HCSR04_ECHO_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(HCSR04_ECHO_GPIO_Port, &GPIO_InitStruct);
-
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-  /* USER CODE END MX_GPIO_Init 2 */
 
 }
 
