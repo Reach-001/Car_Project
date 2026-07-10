@@ -22,6 +22,8 @@
  *   VEHICLE_GEAR_RATIO          = 减速比（电机端：轮端）
  *   VEHICLE_LEFT_ENCODER_SIGN   = 左轮方向符号（±1）
  *   VEHICLE_RIGHT_ENCODER_SIGN  = 右轮方向符号（±1）
+ *   VEHICLE_LEFT_ENCODER_SPEED_SCALE  = 左轮反馈比例校准
+ *   VEHICLE_RIGHT_ENCODER_SPEED_SCALE = 右轮反馈比例校准
  *
  *   任务周期固定 10ms = 0.01s
  * ──────────────────────────────────────────────────────────── */
@@ -67,8 +69,10 @@ void Estimation_Task10ms(SystemStatePool *pool)
     int32_t r_delta = enc.right_delta * VEHICLE_RIGHT_ENCODER_SIGN;
 
     /* speed = delta × m/pulse / dt */
-    s_state.left_speed_mps       = ((float)l_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
-    s_state.right_speed_mps      = ((float)r_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
+    s_state.left_speed_mps       = (((float)l_delta * METERS_PER_PULSE) / TASK_PERIOD_S) *
+                                   VEHICLE_LEFT_ENCODER_SPEED_SCALE;
+    s_state.right_speed_mps      = (((float)r_delta * METERS_PER_PULSE) / TASK_PERIOD_S) *
+                                   VEHICLE_RIGHT_ENCODER_SPEED_SCALE;
     s_state.body_speed_mps       = (s_state.left_speed_mps + s_state.right_speed_mps) * 0.5f;
     s_state.left_encoder_delta   = l_delta;
     s_state.right_encoder_delta  = r_delta;

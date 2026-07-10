@@ -214,7 +214,7 @@ CMAKE_STRIP:FILEPATH=/opt/ST/STM32CubeCLT_1.21.0/GNU-tools-for-STM32/bin/arm-non
 //Path to a program.
 CMAKE_TAPI:FILEPATH=CMAKE_TAPI-NOTFOUND
 
-//The CMake toolchain file
+//No help, variable specified on the command line.
 CMAKE_TOOLCHAIN_FILE:FILEPATH=/Users/reach/Project/Clion_Project/Car_Project/cmake/gcc-arm-none-eabi.cmake
 
 //If this value is on, makefiles will be generated without the

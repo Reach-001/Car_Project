@@ -51,11 +51,11 @@
  * 第 2 类：车辆几何 / 阿克曼模型（Motion 域使用）
  * ══════════════════════════════════════════════════════════════ */
 
-/* 轴距：前轮转向轴到后轮轴心的距离（m）。需要量实车。 */
-#define VEHICLE_WHEELBASE_M             0.18f
+/* 轴距：前轮转向轴到后轮轴心的距离（m）。实测 14cm。 */
+#define VEHICLE_WHEELBASE_M             0.14f
 
-/* 轮距：左右驱动轮接地点中心距（m）。需要量实车。 */
-#define VEHICLE_TRACK_WIDTH_M           0.14f
+/* 轮距：左右驱动轮接地点中心距（m）。实测 12cm。 */
+#define VEHICLE_TRACK_WIDTH_M           0.12f
 
 /* 阿克曼模型允许的最大左右轮速比例差。
  * 例如 0.60 表示内外轮速度最多相差 ±60%，防止大角度时内侧轮目标速度过小或反向。 */
@@ -66,7 +66,7 @@
  * ══════════════════════════════════════════════════════════════ */
 
 /* 巡线模式固定速度（m/s）。第一版从低速开始，确认稳定后再提高 */
-#define VEHICLE_LINE_FOLLOW_SPEED_MPS    0.30f
+#define VEHICLE_LINE_FOLLOW_SPEED_MPS    0.80f
 
 /* 循迹误差到转向角的比例。track_error 范围约 -2000~+2000。
  * 负误差 → 左转，正误差 → 右转。 */
@@ -105,6 +105,13 @@
  *   actual 为正 → 保持 +1；actual 为负 → 改为 -1 */
 #define VEHICLE_LEFT_ENCODER_SIGN        1             /* 左轮方向符号  */
 #define VEHICLE_RIGHT_ENCODER_SIGN      -1             /* 右轮方向符号  */
+
+/* 左右编码器速度校准系数。
+ * 用途：补偿左右轮编码器码盘、安装位置或轮径差异导致的反馈比例误差。
+ * 标定方法：直行命令下如果实车左轮明显更快，但 CH5≈CH8，说明左轮反馈偏小，
+ *          适当增大 LEFT_SCALE；反之减小。右轮同理。 */
+#define VEHICLE_LEFT_ENCODER_SPEED_SCALE   1.0f        /* 左轮反馈比例 */
+#define VEHICLE_RIGHT_ENCODER_SPEED_SCALE  1.0f        /* 右轮反馈比例 */
 
 /* ══════════════════════════════════════════════════════════════
  * 第 6 类：速度环 PI 参数（Motion/ speed_pi.c 使用）

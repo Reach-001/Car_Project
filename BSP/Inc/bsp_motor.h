@@ -15,8 +15,8 @@
 /* 电机枚举：物理上只有左/右两个电机 */
 typedef enum
 {
-    BSP_MOTOR_LEFT  = 0,   /* 左电机：TIM3 CH1(正转) / CH2(反转) */
-    BSP_MOTOR_RIGHT         /* 右电机：TIM3 CH3(正转) / CH4(反转) */
+    BSP_MOTOR_LEFT  = 0,   /* 左电机：TIM3 CH1(反转) / CH2(正转) */
+    BSP_MOTOR_RIGHT         /* 右电机：TIM3 CH3(反转) / CH4(正转) */
 } BspMotorId;
 
 /* ── 生命周期 ── */

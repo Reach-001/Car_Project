@@ -28,6 +28,39 @@ static float steer_cmd_right_limit_rad(void)
     return VEHICLE_STEER_RIGHT_CMD_LIMIT_RAD;
 }
 
+static float absf_local(float value)
+{
+    return (value < 0.0f) ? -value : value;
+}
+
+static bool limit_wheel_targets(float *left_mps, float *right_mps)
+{
+    float left_abs;
+    float right_abs;
+    float max_abs;
+    float scale;
+
+    if ((left_mps == 0) || (right_mps == 0))
+    {
+        return false;
+    }
+
+    left_abs  = absf_local(*left_mps);
+    right_abs = absf_local(*right_mps);
+    max_abs   = (left_abs > right_abs) ? left_abs : right_abs;
+
+    if (max_abs <= SPEED_MAX_MPS)
+    {
+        return false;
+    }
+
+    /* 阿克曼差速后按同一比例缩放，保留内外轮速度比例，避免外侧轮目标超出驱动上限。 */
+    scale = SPEED_MAX_MPS / max_abs;
+    *left_mps  *= scale;
+    *right_mps *= scale;
+    return true;
+}
+
 static MotionState s_state;
 static bool        s_emergency_brake;
 
@@ -88,6 +121,7 @@ void Motion_Task10ms(SystemStatePool *pool)
     /* ── 步骤 2：阿克曼左右轮分配 ── */
     float L_target, R_target;
     Ackermann_Compute(target_speed, target_steer, &L_target, &R_target);
+    bool wheel_speed_limited = limit_wheel_targets(&L_target, &R_target);
 
     /* ── 步骤 3：左右轮 PI 闭环 ── */
     float L_actual = pool->estimation.valid ? pool->estimation.left_speed_mps  : 0.0f;
@@ -102,7 +136,8 @@ void Motion_Task10ms(SystemStatePool *pool)
     if (R_pwm > PWM_MAX) R_pwm = PWM_MAX;
     if (R_pwm < PWM_MIN) R_pwm = PWM_MIN;
 
-    bool limited = (L_pwm == PWM_MAX || L_pwm == PWM_MIN ||
+    bool limited = wheel_speed_limited ||
+                   (L_pwm == PWM_MAX || L_pwm == PWM_MIN ||
                     R_pwm == PWM_MAX || R_pwm == PWM_MIN);
 
     /* ── 步骤 5：舵机计算 ── */
