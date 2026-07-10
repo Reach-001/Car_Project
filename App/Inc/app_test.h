@@ -31,7 +31,7 @@
 #define TEST_UART       8
 
 /* 选择当前要运行的测试 */
-#define TEST_SELECT  0
+#define TEST_SELECT  TEST_NONE
 
 void AppTest_Init(void);
 void AppTest_Run(void);

@@ -7,15 +7,14 @@
 /* ────────────────────────────────────────────────────────────
  * UART 通信驱动（DMA 收发）—— 硬件抽象层头文件
  *
- * 接收：DMA 循环模式，256 字节循环缓冲
- *       HAL_UART_Receive_DMA 启动一次，持续后台收。
- *       HT（半满）/ TC（全满）中断 → 拷贝到 RingBuffer
- *       Task 侧通过 ReadByte / Available 从 RingBuffer 读。
+ * 接收：DMA 循环模式，256 字节循环缓冲。
+ *       Task 侧通过 ReadByte / Available 轮询 DMA 写指针，
+ *       将增量数据搬到 RingBuffer，短包也能及时读到。
  *
  * 发送：DMA 异步，单缓冲
  *       WriteBuffer 启动 DMA 发送立即返回
  *       TxDone 查询是否发送完毕
- *       WriteString 内部用 WriteBuffer（等上次发完才启动）
+ *       WriteString 内部用 WriteBuffer，不阻塞等待
  *
  * 硬件映射：
  *   BSP_UART_K230 = USART2  DMA1_CH1(RX) DMA1_CH2(TX)
@@ -50,8 +49,7 @@ bool BspUart_WriteBuffer(BspUartId id, const uint8_t *data, uint16_t len);
 /** 上一次 WriteBuffer 是否已完成（可发起下一次发送） */
 bool BspUart_TxDone(BspUartId id);
 
-/** 发送字符串（阻塞直到空闲）
- *  内部调用 WriteBuffer，等待空闲。仅用于短数据 / 调试输出 */
+/** 发送字符串，内部调用 WriteBuffer，不阻塞等待 */
 void BspUart_WriteString(BspUartId id, const char *str);
 
 /* ── DMA 接收管理（由 HAL 回调调用，用户不直接调） ── */

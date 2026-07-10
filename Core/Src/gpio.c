@@ -89,7 +89,7 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin : HCSR04_ECHO_Pin */
   GPIO_InitStruct.Pin = HCSR04_ECHO_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(HCSR04_ECHO_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : STATE_LED_Pin */
@@ -110,7 +110,7 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pin = TRACK_1_Pin|TRACK_2_Pin|TRACK_3_Pin|TRACK_4_Pin
                           |TRACK_5_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
 }

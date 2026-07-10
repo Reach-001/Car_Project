@@ -1,84 +1,101 @@
+/* ────────────────────────────────────────────────────────────
+ * V2 任务注册（时间槽隔离）
+ *
+ * 10ms 硬实时槽：Estimation → Motion
+ *   （先估计速度，再执行控制闭环）
+ * 20ms 逻辑槽：HMI_Key → Sensor → Comm → Decision
+ *   （按键先采集事件，传感器和通信更新数据，Decision 最后
+ *     消费本轮所有事件并计算目标）
+ * 500ms 低优先槽：HMI
+ *   （LED/蜂鸣器更新，不影响控制实时性）
+ * ──────────────────────────────────────────────────────────── */
+
 #include "app_tasks.h"
 
-#include "app_mode.h"
-#include "bsp_buzzer.h"
-#include "bsp_key.h"
-#include "bsp_led.h"
-#include "iwdg.h"
-#include "bt_link.h"
-#include "chassis.h"
-#include "k230_link.h"
+#include "system_state_pool.h"
+#include "sensor_domain.h"
+#include "estimation.h"
+#include "motion.h"
+#include "decision.h"
+#include "comm.h"
+#include "hmi.h"
+#include "debug_trace.h"
 #include "scheduler.h"
-#include "tracker.h"
-#include "ultrasonic.h"
+#include "iwdg.h"
 
-static void Task_Chassis10ms(void *context)
+#include "stm32g4xx_hal.h"
+
+/* 引用 App 层的全局状态池 */
+extern SystemStatePool g_state;
+
+/* ── 10ms 槽 ── */
+
+static void Task_Estimation10ms(void *ctx)
 {
-    (void)context;
-    Chassis_Task10ms();
+    Estimation_Task10ms((SystemStatePool *)ctx);
 }
 
-static void Task_Peripheral10ms(void *context)
+static void Task_Motion10ms(void *ctx)
 {
-    (void)context;
-    BspKey_Task10ms();
-    BspBuzzer_Task10ms();
-    Tracker_Task10ms();
-    Ultrasonic_Task10ms();
+    Motion_Task10ms((SystemStatePool *)ctx);
 }
 
-static void Task_Input20ms(void *context)
-{
-    (void)context;
+/* ── 20ms 槽 ── */
 
-    if (BspKey_TakeClickedEvent(BSP_KEY_1))
-    {
-        Chassis_Stop();
-    }
+static void Task_HmiKey10ms(void *ctx)
+{
+    Hmi_KeyTask10ms((SystemStatePool *)ctx);
 }
 
-static void Task_Communication10ms(void *context)
+static void Task_Sensor20ms(void *ctx)
 {
-    BtCommand bt_command;
-    K230Result k230_result;
-    (void)context;
-
-    K230Link_Task();
-    BtLink_Task();
-
-    if (BtLink_TakeCommand(&bt_command))
-    {
-        AppMode_HandleBtCommand(&bt_command);
-    }
-
-    if (K230Link_GetLatestResult(&k230_result))
-    {
-        AppMode_HandleK230Result(&k230_result);
-    }
+    Sensor_Task20ms((SystemStatePool *)ctx);
 }
 
-static void Task_Mode20ms(void *context)
+static void Task_Comm20ms(void *ctx)
 {
-    (void)context;
-    AppMode_Task20ms();
+    Comm_Task20ms((SystemStatePool *)ctx);
 }
 
-static void Task_Heartbeat500ms(void *context)
+static void Task_Decision20ms(void *ctx)
 {
-    static bool led_on;
-    (void)context;
-
-    led_on = !led_on;
-    BspLed_Set(BSP_LED_STATE, led_on);
-    HAL_IWDG_Refresh(&hiwdg);
+    SystemStatePool *pool = (SystemStatePool *)ctx;
+    Decision_Task20ms(pool);
+    /* Decision 消费完事件后清理 */
+    SystemStatePool_ClearCycleEvents(pool);
 }
+
+static void Task_DebugCurve100ms(void *ctx)
+{
+    DebugTrace_Task100ms((SystemStatePool *)ctx);
+}
+
+/* ── 500ms 槽 ── */
+
+static void Task_Hmi500ms(void *ctx)
+{
+    SystemStatePool *pool = (SystemStatePool *)ctx;
+    Hmi_Task500ms(pool);
+    HAL_IWDG_Refresh(&hiwdg);          /* 500ms 喂一次看门狗 */
+}
+
+/* ── 注册 ── */
 
 void AppTasks_Register(void)
 {
-    (void)Scheduler_AddTask("peripheral", Task_Peripheral10ms, 0, 10U, 0U);
-    (void)Scheduler_AddTask("chassis", Task_Chassis10ms, 0, 10U, 0U);
-    (void)Scheduler_AddTask("comm", Task_Communication10ms, 0, 10U, 1U);
-    (void)Scheduler_AddTask("mode", Task_Mode20ms, 0, 20U, 3U);
-    (void)Scheduler_AddTask("input", Task_Input20ms, 0, 20U, 2U);
-    (void)Scheduler_AddTask("heartbeat", Task_Heartbeat500ms, 0, 500U, 0U);
+    /* 10ms：估计在前，控制在后 */
+    Scheduler_AddTask("estimation", Task_Estimation10ms, &g_state, 10U, 0U);
+    Scheduler_AddTask("motion",     Task_Motion10ms,     &g_state, 10U, 1U);
+
+    /* 20ms：按键（10ms 去抖需要高频）→ 传感器 → 通信 → 决策最后 */
+    Scheduler_AddTask("hmi_key",    Task_HmiKey10ms,    &g_state, 10U, 0U);
+    Scheduler_AddTask("sensor",     Task_Sensor20ms,    &g_state, 20U, 2U);
+    Scheduler_AddTask("comm",       Task_Comm20ms,      &g_state, 20U, 4U);
+    Scheduler_AddTask("decision",   Task_Decision20ms,  &g_state, 20U, 6U);
+
+    /* 100ms：蓝牙输出小端 float 曲线帧 */
+    Scheduler_AddTask("debug_curve", Task_DebugCurve100ms, &g_state, 100U, 7U);
+
+    /* 500ms：LED+蜂鸣器+喂狗 */
+    Scheduler_AddTask("hmi",        Task_Hmi500ms,      &g_state, 500U, 0U);
 }

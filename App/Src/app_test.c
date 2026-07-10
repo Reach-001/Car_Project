@@ -9,10 +9,18 @@
 #include "bsp_motor.h"
 #include "bsp_servo.h"
 #include "bsp_uart.h"
+#include "estimation.h"
+#include "motion.h"
 #include "scheduler.h"
+#include "sensor_domain.h"
+#include "system_state_pool.h"
 #include "tim.h"
 
 #include <string.h>
+
+#if (TEST_SELECT == TEST_MOTOR) || (TEST_SELECT == TEST_ENCODER) || (TEST_SELECT == TEST_SENSOR)
+static SystemStatePool s_test_pool;
+#endif
 
 /* ══════════════════════════════════════════════════════════════
  * 测试 1：LED
@@ -163,36 +171,62 @@ void AppTest_Run(void)
  *
  * ⚠ 车轮需悬空！
  *
- * 预期：只测试前进差速转弯：
- *       实车标定结果：
- *       左 90%、右 60% → 左转；
- *       左 60%、右 90% → 右转；
- *       每段之间 0/0 滑行停止，循环执行。
+ * 预期：通过 V2 Motion 链路测试前进转弯：
+ *       target speed/steer → Estimation → Motion → 电机/舵机。
+ *       左转、停车、右转、停车循环执行。
  * ══════════════════════════════════════════════════════════════ */
 
 #if TEST_SELECT == TEST_MOTOR
 
-void AppTest_Init(void) { BspLed_Init(); BspMotor_Init(); }
+void AppTest_Init(void)
+{
+    BspLed_Init();
+    BspKey_Init();
+    BspMotor_Init();
+    (void)BspServo_Init();
+    BspEncoder_Init();
+
+    SystemStatePool_Init(&s_test_pool);
+    Estimation_Init();
+    Motion_Init();
+}
 
 void AppTest_Run(void)
 {
-    struct { int16_t L; int16_t R; uint32_t ms; int led; } seq[] = {
-        /* Left turn: calibrated on the vehicle, left motor faster than right. */
-        {  900,   600, 2500, 1}, {    0,     0,  700, 0},
-
-        /* Right turn: calibrated on the vehicle, right motor faster than left. */
-        {  600,   900, 2500, 2}, {    0,     0,  700, 0},
+    struct { float speed_mps; float steer_rad; uint32_t ms; int led; } seq[] = {
+        /* V2 Motion demo: negative steer = left turn, positive steer = right turn. */
+        {  0.30f, -0.35f, 2500, 1}, {  0.0f, 0.0f,  700, 0},
+        {  0.30f,  0.35f, 2500, 2}, {  0.0f, 0.0f,  700, 0},
     };
     static const int N = sizeof(seq) / sizeof(seq[0]);
     static int step;
     static uint32_t t0;
+    static uint32_t last;
     uint32_t now = HAL_GetTick();
 
     if (step == 0 && t0 == 0) { t0 = now; BspLed_Set(BSP_LED_STATE, false); }
+    if ((uint32_t)(now - last) < 10U) return;
+    last = now;
+
+    BspKey_Task10ms();
+    if (BspKey_TakeClickedEvent(BSP_KEY_1))
+    {
+        s_test_pool.target.speed_mps = 0.0f;
+        s_test_pool.target.steer_angle_rad = 0.0f;
+        s_test_pool.target.valid = true;
+        Motion_Task10ms(&s_test_pool);
+        BspLed_Set(BSP_LED_STATE, true);
+        return;
+    }
 
     if (step < N) {
-        BspMotor_SetDuty(BSP_MOTOR_LEFT,  seq[step].L);
-        BspMotor_SetDuty(BSP_MOTOR_RIGHT, seq[step].R);
+        s_test_pool.tick_ms = now;
+        s_test_pool.target.speed_mps = seq[step].speed_mps;
+        s_test_pool.target.steer_angle_rad = seq[step].steer_rad;
+        s_test_pool.target.valid = true;
+
+        Estimation_Task10ms(&s_test_pool);
+        Motion_Task10ms(&s_test_pool);
 
         BspLed_Set(BSP_LED_1, seq[step].led == 1);
         BspLed_Set(BSP_LED_2, seq[step].led == 2);
@@ -259,6 +293,8 @@ void AppTest_Init(void)
     BspLed_Init();
     BspEncoder_Init();
     BspKey_Init();
+    SystemStatePool_Init(&s_test_pool);
+    Estimation_Init();
 }
 
 void AppTest_Run(void)
@@ -275,9 +311,11 @@ void AppTest_Run(void)
     if (BspKey_TakeClickedEvent(BSP_KEY_1)) { done = true; }
 
     if (!done) {
-        BspEncoderSample enc = BspEncoder_Read();
-        int32_t aL = enc.left_delta;   if (aL < 0) aL = -aL;
-        int32_t aR = enc.right_delta;  if (aR < 0) aR = -aR;
+        Estimation_Task10ms(&s_test_pool);
+        int32_t aL = s_test_pool.estimation.left_encoder_delta;
+        int32_t aR = s_test_pool.estimation.right_encoder_delta;
+        if (aL < 0) aL = -aL;
+        if (aR < 0) aR = -aR;
         int32_t maxd = (aL > aR) ? aL : aR;
         BspLed_Set(BSP_LED_1, maxd > 10);
         BspLed_Set(BSP_LED_2, maxd > 50);
@@ -300,15 +338,14 @@ void AppTest_Run(void)
 
 #if TEST_SELECT == TEST_SENSOR
 
-#include "ultrasonic.h"
-
 void AppTest_Init(void)
 {
     BspLed_Init();
     BspGpioSensor_Init();
     BspKey_Init();
     BspBuzzer_Init();
-    Ultrasonic_Init();
+    SystemStatePool_Init(&s_test_pool);
+    Sensor_Init();
 }
 
 void AppTest_Run(void)
@@ -329,17 +366,14 @@ void AppTest_Run(void)
         return;
     }
 
-    /* ── 循迹：5 路映射 4 LED ── */
-    BspTrackRaw track = BspGpioSensor_ReadTrack();
-    BspLed_Set(BSP_LED_1,     track.sensor[0]);
-    BspLed_Set(BSP_LED_2,     track.sensor[1]);
-    BspLed_Set(BSP_LED_3,     track.sensor[2]);
-    BspLed_Set(BSP_LED_STATE, track.sensor[3] || track.sensor[4]);
+    Sensor_Task20ms(&s_test_pool);
 
-    /* ── 超声波：由模块 Task10ms 周期驱动 ── */
-    Ultrasonic_Task10ms();
-    UltrasonicSample us = Ultrasonic_GetSample();
-    bool near = us.valid && us.distance_mm < 300U;   /* 30cm 内 = 有障碍 */
+    BspLed_Set(BSP_LED_1, (s_test_pool.sensor.track_bits & (1U << 0)) != 0U);
+    BspLed_Set(BSP_LED_2, (s_test_pool.sensor.track_bits & (1U << 1)) != 0U);
+    BspLed_Set(BSP_LED_3, (s_test_pool.sensor.track_bits & (1U << 2)) != 0U);
+    BspLed_Set(BSP_LED_STATE, (s_test_pool.sensor.track_bits & ((1U << 3) | (1U << 4))) != 0U);
+
+    bool near = s_test_pool.sensor.obstacle_near;
 
     BspBuzzer_Set(near);
     BspBuzzer_Task10ms();

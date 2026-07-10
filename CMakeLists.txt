@@ -44,10 +44,13 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    # App 层
     App/Src/app_main.c
     App/Src/app_tasks.c
     App/Src/app_test.c
+    App/Src/system_state_pool.c
+
+    # BSP 驱动
     BSP/Src/bsp_buzzer.c
     BSP/Src/bsp_encoder.c
     BSP/Src/bsp_gpio_sensor.c
@@ -56,13 +59,39 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     BSP/Src/bsp_motor.c
     BSP/Src/bsp_servo.c
     BSP/Src/bsp_uart.c
-    Modules/Src/app_mode.c
-    Modules/Src/bt_link.c
-    Modules/Src/chassis.c
-    Modules/Src/k230_link.c
-    Modules/Src/protocol.c
-    Modules/Src/tracker.c
-    Modules/Src/ultrasonic.c
+
+    # V2 Module 层 ── Sensor 域
+    Modules/Sensor/Src/sensor_domain.c
+    Modules/Sensor/Src/tracker_sensor.c
+    Modules/Sensor/Src/ultrasonic_sensor.c
+
+    # V2 Module 层 ── Comm 域
+    Modules/Comm/Src/comm.c
+    Modules/Comm/Src/bt_link.c
+    Modules/Comm/Src/k230_link.c
+    Modules/Comm/Src/protocol.c
+
+    # V2 Module 层 ── Estimation 域
+    Modules/Estimation/Src/estimation.c
+
+    # V2 Module 层 ── Motion 域
+    Modules/Motion/Src/motion.c
+    Modules/Motion/Src/ackermann.c
+    Modules/Motion/Src/speed_pi.c
+
+    # V2 Module 层 ── Decision 域
+    Modules/Decision/Src/decision.c
+
+    # V2 Module 层 ── HMI 域
+    Modules/HMI/Src/hmi.c
+    Modules/HMI/Src/key_service.c
+    Modules/HMI/Src/led_service.c
+    Modules/HMI/Src/buzzer_service.c
+
+    # V2 Module 层 ── Debug 域
+    Modules/Debug/Src/debug_trace.c
+
+    # Service 层
     Service/Src/ring_buffer.c
     Service/Src/scheduler.c
 )
@@ -72,7 +101,13 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined include paths
     App/Inc
     BSP/Inc
-    Modules/Inc
+    Modules/Sensor/Inc
+    Modules/Comm/Inc
+    Modules/Estimation/Inc
+    Modules/Motion/Inc
+    Modules/Decision/Inc
+    Modules/HMI/Inc
+    Modules/Debug/Inc
     Service/Inc
 )
 
