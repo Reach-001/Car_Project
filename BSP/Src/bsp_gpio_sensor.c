@@ -10,6 +10,13 @@
  * 上层 Module 通过这里统一访问传感器 GPIO，不直接调 HAL。
  * ──────────────────────────────────────────────────────────── */
 
+/* ── 初始化 ── */
+
+void BspGpioSensor_Init(void)
+{
+    BspGpioSensor_TrigSet(false);
+}
+
 /* ── 循迹传感器 ── */
 
 BspTrackRaw BspGpioSensor_ReadTrack(void)

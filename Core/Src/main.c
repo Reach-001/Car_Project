@@ -101,7 +101,6 @@ int main(void)
   MX_TIM6_Init();
   MX_TIM7_Init();
   MX_IWDG_Init();
-  MX_TIM6_Init();
   /* USER CODE BEGIN 2 */
   App_Init();
 

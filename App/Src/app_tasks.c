@@ -69,7 +69,7 @@ static void Task_Heartbeat500ms(void *context)
     (void)context;
 
     led_on = !led_on;
-    BspLed_SetStateLed(led_on);
+    BspLed_Set(BSP_LED_STATE, led_on);
     HAL_IWDG_Refresh(&hiwdg);
 }
 

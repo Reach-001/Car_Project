@@ -1,7 +1,9 @@
 #include "app_main.h"
 
 #include "app_tasks.h"
+#include "app_test.h"
 #include "app_mode.h"
+#include "iwdg.h"
 #include "bsp_buzzer.h"
 #include "bsp_encoder.h"
 #include "bsp_led.h"
@@ -20,6 +22,9 @@
 
 void App_Init(void)
 {
+#if TEST_SELECT != TEST_NONE
+    AppTest_Init();
+#else
     BspLed_Init();
     BspBuzzer_Init();
     BspKey_Init();
@@ -38,9 +43,15 @@ void App_Init(void)
 
     Scheduler_Init();
     AppTasks_Register();
+#endif
 }
 
 void App_Run(void)
 {
+#if TEST_SELECT != TEST_NONE
+    HAL_IWDG_Refresh(&hiwdg);
+    AppTest_Run();
+#else
     Scheduler_Run(HAL_GetTick());
+#endif
 }

@@ -30,11 +30,14 @@ typedef struct
     BspKeyInfo    info;                    /* 对外暴露的状态信息   */
 } KeyContext;
 
-/* 三个按键的静态上下文（初始值由 main.h 的宏填充，active_high = false） */
+/* 四个按键的静态上下文（初始值由 main.h 的宏填充）
+ * KEY1~3: 外部上拉，按下=低 → active_high=false
+ * KEY4:   User_Key，按下=高 → active_high=true */
 static KeyContext s_keys[BSP_KEY_COUNT] = {
-    {KEY1_GPIO_Port, KEY1_Pin, false, false, false, 0U, 0U, {0}},
-    {KEY2_GPIO_Port, KEY2_Pin, false, false, false, 0U, 0U, {0}},
-    {KEY3_GPIO_Port, KEY3_Pin, false, false, false, 0U, 0U, {0}},
+    {KEY1_GPIO_Port,      KEY1_Pin,      false, false, false, 0U, 0U, {0}},
+    {KEY2_GPIO_Port,      KEY2_Pin,      false, false, false, 0U, 0U, {0}},
+    {KEY3_GPIO_Port,      KEY3_Pin,      false, false, false, 0U, 0U, {0}},
+    {User_Key_GPIO_Port, User_Key_Pin,   true,  false, false, 0U, 0U, {0}},
 };
 
 /* ── 内部辅助函数 ── */

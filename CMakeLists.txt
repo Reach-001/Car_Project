@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     App/Src/app_main.c
     App/Src/app_tasks.c
+    App/Src/app_test.c
     BSP/Src/bsp_buzzer.c
     BSP/Src/bsp_encoder.c
     BSP/Src/bsp_gpio_sensor.c
