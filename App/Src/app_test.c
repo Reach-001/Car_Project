@@ -355,9 +355,9 @@ void AppTest_Run(void)
 /* ══════════════════════════════════════════════════════════════
  * 测试 8：UART DMA
  *
- *  方案A（短接 USART2 TX → USART3 RX）：发 "TEST\r\n" → 检查收回 → OK
- *  方案B（串口助手）：向 USART2 发任意数据，LED 显示收到字节数
- *  KEY1 切换 A/B，KEY4 重发。
+ *  桥接测试：
+ *    USART2_RX(PA3)  收到 → USART3_TX(PC10) 发出，LED1 闪
+ *    USART3_RX(PC11) 收到 → USART2_TX(PA2)  发出，LED2 闪
  * ══════════════════════════════════════════════════════════════ */
 
 #if TEST_SELECT == TEST_UART
@@ -372,46 +372,34 @@ void AppTest_Init(void)
 
 void AppTest_Run(void)
 {
-    static bool done, mode_echo = true, test_sent;
-    static char rx_buf[64];
-    static int  rx_idx;
-    static uint32_t last, t_sent;
+    static uint32_t last;
+    uint8_t bridge_buf[64];
     uint32_t now = HAL_GetTick();
     if ((uint32_t)(now - last) < 10U) return;
     last = now;
 
-    if (done) return;
-
     BspKey_Task10ms();
-    if (BspKey_TakeClickedEvent(BSP_KEY_1)) { mode_echo = !mode_echo; }
-    if (BspKey_TakeClickedEvent(BSP_KEY_4)) { test_sent = false; rx_idx = 0; }
-
-    if (mode_echo) {
-        if (!test_sent) {
-            BspUart_WriteString(BSP_UART_K230, "TEST\r\n");
-            test_sent = true; t_sent = now; rx_idx = 0;
-            BspLed_Set(BSP_LED_2, true);
-        }
-        uint8_t b;
-        while (BspUart_ReadByte(BSP_UART_BT, &b) && rx_idx < 63) rx_buf[rx_idx++] = (char)b;
-        rx_buf[rx_idx] = '\0';
-
-        if (rx_idx > 0 && strstr(rx_buf, "TEST")) {
-            BspLed_Set(BSP_LED_1, false); BspLed_Set(BSP_LED_2, false); BspLed_Set(BSP_LED_3, false);
-            BspLed_Set(BSP_LED_STATE, true); done = true;
-        }
-        /* 超时 5s → LED1 亮（需重新短接 TX-RX） */
-        if (!done && rx_idx == 0 && (uint32_t)(now - t_sent) > 5000U) {
-            BspLed_Set(BSP_LED_1, true);
-            test_sent = false;
-        }
-    } else {
-        uint8_t b; uint16_t n = 0;
-        while (BspUart_ReadByte(BSP_UART_K230, &b)) ++n;
-        BspLed_Set(BSP_LED_1, n > 0);
-        BspLed_Set(BSP_LED_2, n > 5);
-        BspLed_Set(BSP_LED_3, n > 20);
+    if (BspKey_TakeClickedEvent(BSP_KEY_1)) {
+        BspLed_Set(BSP_LED_STATE, true);
     }
+
+    uint16_t n = 0U;
+    while ((n < sizeof(bridge_buf)) && BspUart_ReadByte(BSP_UART_K230, &bridge_buf[n])) {
+        ++n;
+    }
+    bool forwarded_2_to_3 = (n > 0U) && BspUart_TxDone(BSP_UART_BT) &&
+                            BspUart_WriteBuffer(BSP_UART_BT, bridge_buf, n);
+
+    n = 0U;
+    while ((n < sizeof(bridge_buf)) && BspUart_ReadByte(BSP_UART_BT, &bridge_buf[n])) {
+        ++n;
+    }
+    bool forwarded_3_to_2 = (n > 0U) && BspUart_TxDone(BSP_UART_K230) &&
+                            BspUart_WriteBuffer(BSP_UART_K230, bridge_buf, n);
+
+    BspLed_Set(BSP_LED_1, forwarded_2_to_3);
+    BspLed_Set(BSP_LED_2, forwarded_3_to_2);
+    BspLed_Set(BSP_LED_3, !forwarded_2_to_3 && !forwarded_3_to_2);
 }
 
 #endif /* TEST_UART */

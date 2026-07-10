@@ -43,7 +43,7 @@ uint16_t BspUart_Available(BspUartId id);
 
 /* ── 发送（DMA 异步，立即返回） ── */
 
-/** 启动 DMA 发送，数据指针和长度由调用方保证生命周期
+/** 启动 DMA 发送，数据会拷贝到驱动内部缓冲
  *  @return true = DMA 已启动；false = 上一次发送未完成 */
 bool BspUart_WriteBuffer(BspUartId id, const uint8_t *data, uint16_t len);
 

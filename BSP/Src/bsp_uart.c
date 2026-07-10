@@ -11,8 +11,7 @@
  *
  * 接收路线：
  *   硬件 DMA 循环写 → dma_rx_buf（256 字节）
- *   HT 中断（128 字节满）→ 拷贝 buf[0..127]→RingBuffer
- *   TC 中断（256 字节满）→ 拷贝 buf[128..255]→RingBuffer
+ *   Task 轮询 DMA 当前写指针 → 增量搬运到 RingBuffer
  *   Task → BspUart_ReadByte → RingBuffer_Pop
  *
  * 发送路线：
@@ -28,6 +27,7 @@
 #define DMA_RX_HALF_SIZE (DMA_RX_BUF_SIZE / 2U)   /* 半满阈值 */
 
 #define RING_BUF_SIZE    128U          /* RingBuffer 大小（任务侧读）   */
+#define TX_BUF_SIZE      128U          /* DMA TX 内部拷贝缓冲大小       */
 
 /* ── DMA TX 完成标志 ── */
 typedef enum { TX_IDLE = 0, TX_BUSY } TxState;
@@ -41,9 +41,11 @@ typedef struct
     uint8_t    dma_rx_buf[DMA_RX_BUF_SIZE]; /* DMA 循环写缓冲区           */
     uint8_t    ring_storage[RING_BUF_SIZE];  /* RingBuffer 存储空间        */
     RingBuffer rx_ring;                     /* ISR Push → Task Pop         */
+    uint16_t   rx_dma_read_pos;              /* Task 已搬运到的位置         */
 
     /* ── DMA TX ── */
-    const uint8_t *tx_data;                 /* 待发送数据指针（调用方持有）*/
+    uint8_t        tx_storage[TX_BUF_SIZE];  /* DMA 发送内部缓冲            */
+    const uint8_t *tx_data;                 /* 指向 tx_storage             */
     uint16_t       tx_len;                  /* 待发送数据长度              */
     volatile TxState tx_state;              /* 发送状态（ISR 中修改）      */
 
@@ -82,6 +84,7 @@ void BspUart_Init(BspUartId id)
     ctx->tx_data     = 0;
     ctx->tx_len      = 0U;
     ctx->tx_state    = TX_IDLE;
+    ctx->rx_dma_read_pos = 0U;
     ctx->initialized = true;
 
     /* 初始化 RingBuffer */
@@ -94,6 +97,30 @@ void BspUart_Init(BspUartId id)
     HAL_UART_Receive_DMA(huart, ctx->dma_rx_buf, DMA_RX_BUF_SIZE);
 }
 
+static void poll_dma_rx(BspUartCtx *ctx)
+{
+    if ((ctx == 0) || !ctx->initialized || (ctx->huart == 0) || (ctx->huart->hdmarx == 0))
+    {
+        return;
+    }
+
+    uint16_t write_pos = (uint16_t)(DMA_RX_BUF_SIZE - __HAL_DMA_GET_COUNTER(ctx->huart->hdmarx));
+    if (write_pos >= DMA_RX_BUF_SIZE)
+    {
+        write_pos = 0U;
+    }
+
+    while (ctx->rx_dma_read_pos != write_pos)
+    {
+        (void)RingBuffer_PushFromIsr(&ctx->rx_ring, ctx->dma_rx_buf[ctx->rx_dma_read_pos]);
+        ++ctx->rx_dma_read_pos;
+        if (ctx->rx_dma_read_pos >= DMA_RX_BUF_SIZE)
+        {
+            ctx->rx_dma_read_pos = 0U;
+        }
+    }
+}
+
 /* ── 接收（从 RingBuffer 读，非阻塞） ── */
 
 bool BspUart_ReadByte(BspUartId id, uint8_t *byte)
@@ -101,6 +128,7 @@ bool BspUart_ReadByte(BspUartId id, uint8_t *byte)
     if (((uint32_t)id >= (uint32_t)BSP_UART_COUNT) || (byte == 0)) { return false; }
     BspUartCtx *ctx = &s_ctx[id];
     if (!ctx->initialized) { return false; }
+    poll_dma_rx(ctx);
     return RingBuffer_Pop(&ctx->rx_ring, byte);
 }
 
@@ -109,6 +137,7 @@ uint16_t BspUart_Available(BspUartId id)
     if ((uint32_t)id >= (uint32_t)BSP_UART_COUNT) { return 0U; }
     BspUartCtx *ctx = &s_ctx[id];
     if (!ctx->initialized) { return 0U; }
+    poll_dma_rx(ctx);
     return RingBuffer_Available(&ctx->rx_ring);
 }
 
@@ -120,12 +149,20 @@ bool BspUart_WriteBuffer(BspUartId id, const uint8_t *data, uint16_t len)
 
     BspUartCtx *ctx = &s_ctx[id];
     if (!ctx->initialized || ctx->tx_state != TX_IDLE) { return false; }
+    if (len > TX_BUF_SIZE) { return false; }
 
-    ctx->tx_data  = data;
+    memcpy(ctx->tx_storage, data, len);
+    ctx->tx_data  = ctx->tx_storage;
     ctx->tx_len   = len;
     ctx->tx_state = TX_BUSY;
 
-    HAL_UART_Transmit_DMA(ctx->huart, (uint8_t *)data, len);
+    if (HAL_UART_Transmit_DMA(ctx->huart, ctx->tx_storage, len) != HAL_OK)
+    {
+        ctx->tx_data  = 0;
+        ctx->tx_len   = 0U;
+        ctx->tx_state = TX_IDLE;
+        return false;
+    }
     return true;
 }
 
@@ -140,38 +177,20 @@ void BspUart_WriteString(BspUartId id, const char *str)
 {
     if (str == 0) { return; }
 
-    /* 简单实现：等上次发完，再发本次。阻塞短字符串 OK */
-    while (!BspUart_TxDone(id)) { }
-    BspUart_WriteBuffer(id, (const uint8_t *)str,
-                        (uint16_t)strlen((const char *)str));
+    (void)BspUart_WriteBuffer(id, (const uint8_t *)str,
+                              (uint16_t)strlen((const char *)str));
 }
 
 /* ── DMA 接收数据搬运（ISR 回调中调用） ── */
 
 void BspUart_DmaRxHalfCplt(BspUartId id)
 {
-    if ((uint32_t)id >= (uint32_t)BSP_UART_COUNT) { return; }
-    BspUartCtx *ctx = &s_ctx[id];
-    if (!ctx->initialized) { return; }
-
-    /* 上半部 DMA 缓冲已满（0 .. HALF_SIZE-1），搬进 RingBuffer */
-    for (uint16_t i = 0U; i < DMA_RX_HALF_SIZE; ++i)
-    {
-        RingBuffer_PushFromIsr(&ctx->rx_ring, ctx->dma_rx_buf[i]);
-    }
+    (void)id;
 }
 
 void BspUart_DmaRxFullCplt(BspUartId id)
 {
-    if ((uint32_t)id >= (uint32_t)BSP_UART_COUNT) { return; }
-    BspUartCtx *ctx = &s_ctx[id];
-    if (!ctx->initialized) { return; }
-
-    /* 下半部 DMA 缓冲已满（HALF_SIZE .. BUF_SIZE-1），搬进 RingBuffer */
-    for (uint16_t i = DMA_RX_HALF_SIZE; i < DMA_RX_BUF_SIZE; ++i)
-    {
-        RingBuffer_PushFromIsr(&ctx->rx_ring, ctx->dma_rx_buf[i]);
-    }
+    (void)id;
 }
 
 /* ────────────────────────────────────────────────────────────
