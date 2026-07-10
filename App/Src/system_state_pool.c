@@ -1,9 +1,10 @@
 #include "system_state_pool.h"
+#include "vehicle_config.h"
 
 /* ────────────────────────────────────────────────────────────
  * 系统状态池实现
  *
- * Init：全部归零/无效，mode=SYS_MODE_STOP，进入安全状态
+ * Init：全部归零/无效，mode=SYS_MODE_MANUAL，手动目标默认为 0
  * ClearCycleEvents：清零所有一次性 event 标志
  * ──────────────────────────────────────────────────────────── */
 
@@ -11,7 +12,8 @@ void SystemStatePool_Init(SystemStatePool *pool)
 {
     if (pool == 0) return;
 
-    pool->mode        = SYS_MODE_STOP;
+    pool->mode        = SYS_MODE_MANUAL;
+    pool->auto_task    = AUTO_TASK_NONE;
     pool->target.speed_mps       = 0.0f;
     pool->target.steer_angle_rad = 0.0f;
     pool->target.valid           = false;
@@ -27,7 +29,7 @@ void SystemStatePool_Init(SystemStatePool *pool)
     pool->motion.right_target_mps         = 0.0f;
     pool->motion.left_pwm                 = 0;
     pool->motion.right_pwm                = 0;
-    pool->motion.servo_pulse_us           = 1500U;
+    pool->motion.servo_pulse_us           = VEHICLE_SERVO_CENTER_US;
     pool->motion.limited                  = false;
     pool->sensor.track_bits              = 0U;
     pool->sensor.track_error             = 0;
@@ -41,6 +43,7 @@ void SystemStatePool_Init(SystemStatePool *pool)
     pool->event.key_mode_clicked         = false;
     pool->event.key_task_clicked         = false;
     pool->event.key_user_clicked         = false;
+    pool->event.key_user_long_pressed    = false;
     pool->event.task_start_requested     = false;
     pool->event.task_pause_requested     = false;
     pool->fault.heartbeat_lost           = false;
@@ -51,8 +54,11 @@ void SystemStatePool_Init(SystemStatePool *pool)
     pool->fault.emergency_stop           = false;
     pool->comm.bt_command.type            = BT_COMMAND_NONE;
     pool->comm.bt_command.valid           = false;
+    pool->comm.debug_command.type         = BT_COMMAND_NONE;
+    pool->comm.debug_command.valid        = false;
     pool->comm.k230_result.type           = K230_RESULT_NONE;
     pool->comm.k230_result.valid          = false;
+    pool->debug.enabled                   = false;
     pool->tick_ms                        = 0U;
 }
 
@@ -66,6 +72,7 @@ void SystemStatePool_ClearCycleEvents(SystemStatePool *pool)
     pool->event.key_mode_clicked    = false;
     pool->event.key_task_clicked    = false;
     pool->event.key_user_clicked    = false;
+    pool->event.key_user_long_pressed = false;
     pool->event.task_start_requested = false;
     pool->event.task_pause_requested = false;
 }

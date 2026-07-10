@@ -17,8 +17,9 @@
  *   HMI        → pool->event.key_* + 控制 BSP LED/蜂鸣器
  *   Decision   → pool->mode / pool->target（唯一能写 target 的域）
  *   Motion     → pool->motion / pool->fault.motor_stall / servo_limit
+ *   Debug      → pool->debug
  *
- * event 是一次性的，Decision 消费后调用 ClearCycleEvents 清除。
+ * event 是一次性的，本周期消费者消费后调用 ClearCycleEvents 清除。
  * fault 是持久的，由各域置位，Decision 决定如何处理。
  * ──────────────────────────────────────────────────────────── */
 
@@ -33,6 +34,16 @@ typedef enum
     SYS_MODE_AVOIDANCE,      /* 避障                 */
     SYS_MODE_ERROR           /* 故障                 */
 } SystemMode;
+
+/* ── 自动任务 ── */
+
+typedef enum
+{
+    AUTO_TASK_NONE = 0,             /* 无自动任务           */
+    AUTO_TASK_LINE_FOLLOW = 1,      /* 巡线                 */
+    AUTO_TASK_LINE_FOLLOW_OBSTACLE, /* 巡线 + 避障预留       */
+    AUTO_TASK_INSPECTION            /* 巡检预留             */
+} SystemAutoTask;
 
 /* ── 目标值（Decision 写 → Motion 读） ── */
 
@@ -92,14 +103,15 @@ typedef enum
     BT_COMMAND_MANUAL_MOVE,
     BT_COMMAND_START_TASK,
     BT_COMMAND_PAUSE_TASK,
+    BT_COMMAND_DEBUG_OUTPUT,
     BT_COMMAND_CUSTOM
 } BtCommandType;
 
 typedef struct
 {
     BtCommandType type;
-    int16_t       arg0;      /* speed_permille 或 mode     */
-    int16_t       arg1;      /* steer_permille 或 参数1    */
+    int16_t       arg0;      /* 手动 speed(-100~100) 或 mode */
+    int16_t       arg1;      /* 手动 angle_deg，轮子相对中位角度 */
     int16_t       arg2;      /* 参数2                      */
     uint32_t      timestamp_ms;
     bool          valid;
@@ -126,9 +138,17 @@ typedef struct
 
 typedef struct
 {
-    BtCommand  bt_command;
+    BtCommand  bt_command;       /* 普通控制命令：Decision 消费        */
+    BtCommand  debug_command;    /* 最近一次调试命令记录              */
     K230Result k230_result;
 } CommData;
+
+/* ── 调试输出控制（Debug 域写入） ── */
+
+typedef struct
+{
+    bool enabled;             /* true 时输出曲线帧 */
+} DebugControl;
 
 /* ── 一次性事件（HMI/Comm 写 → Decision 读后清除） ── */
 
@@ -139,7 +159,8 @@ typedef struct
     bool key_stop_clicked;       /* KEY1 单击（紧急停车）     */
     bool key_mode_clicked;       /* KEY2 单击（模式切换）     */
     bool key_task_clicked;       /* KEY3 单击（任务启停）     */
-    bool key_user_clicked;       /* User_Key 单击             */
+    bool key_user_clicked;       /* User_Key 短按             */
+    bool key_user_long_pressed;  /* User_Key 长按             */
     bool task_start_requested;   /* 蓝牙请求启动任务          */
     bool task_pause_requested;   /* 蓝牙请求暂停任务          */
 } SystemEvent;
@@ -161,6 +182,7 @@ typedef struct
 typedef struct
 {
     SystemMode       mode;        /* 当前系统模式              */
+    SystemAutoTask   auto_task;   /* 当前自动任务              */
     SystemTarget     target;      /* 运动目标值               */
     SystemEstimation estimation;  /* 速度估计值               */
     SystemMotion     motion;      /* 运动执行状态             */
@@ -168,6 +190,7 @@ typedef struct
     SystemEvent     event;       /* 一次性事件               */
     SystemFault     fault;       /* 故障标志                 */
     CommData        comm;        /* 通信数据暂存             */
+    DebugControl    debug;       /* 调试输出控制             */
     uint32_t        tick_ms;     /* 当前系统时间（由 App 维护） */
 } SystemStatePool;
 

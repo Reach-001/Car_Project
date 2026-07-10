@@ -15,10 +15,13 @@
 #include "sensor_domain.h"
 #include "system_state_pool.h"
 #include "tim.h"
+#include "debug_trace.h"
+#include "vehicle_config.h"
 
 #include <string.h>
 
-#if (TEST_SELECT == TEST_MOTOR) || (TEST_SELECT == TEST_ENCODER) || (TEST_SELECT == TEST_SENSOR)
+#if (TEST_SELECT == TEST_MOTOR) || (TEST_SELECT == TEST_ENCODER) || \
+    (TEST_SELECT == TEST_SENSOR) || (TEST_SELECT == TEST_SPEED_PID)
 static SystemStatePool s_test_pool;
 #endif
 
@@ -437,6 +440,162 @@ void AppTest_Run(void)
 }
 
 #endif /* TEST_UART */
+
+/* ══════════════════════════════════════════════════════════════
+ * 测试 9：速度环 PID 标定
+ *
+ * ⚠ 先悬空车轮，确认方向正确后再落地低速测试。
+ *
+ * 蓝牙输出 Debug 曲线帧；按键直接调整测试目标，不进入主任务框架。
+ * 目标速度经过 Motion 速度 PI 闭环输出 PWM，用于标定速度环参数。
+ *   KEY1 → 速度清零
+ *   KEY2 → 减速一档，最低到 0，不进入倒车
+ *   KEY3 → 加速一档
+ *   KEY4 → 转向回中
+ * ══════════════════════════════════════════════════════════════ */
+
+#if TEST_SELECT == TEST_SPEED_PID
+
+static float s_pid_target_speed_mps;
+static float s_pid_angle_deg;
+static uint32_t s_key_repeat_ms[4];
+
+#define SPEED_PID_KEY_REPEAT_MS 250U
+
+static float clamp_float(float value, float min_value, float max_value)
+{
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
+}
+
+static void update_speed_test_target(void)
+{
+    float steer = (float)s_pid_angle_deg * VEHICLE_DEG_TO_RAD;
+
+    s_test_pool.target.speed_mps =
+        clamp_float(s_pid_target_speed_mps, -VEHICLE_MAX_SPEED_MPS, VEHICLE_MAX_SPEED_MPS);
+    s_test_pool.target.steer_angle_rad =
+        clamp_float(steer, -VEHICLE_STEER_LEFT_CMD_LIMIT_RAD, VEHICLE_STEER_RIGHT_CMD_LIMIT_RAD);
+    s_test_pool.target.valid = true;
+    s_test_pool.mode = SYS_MODE_MANUAL;
+}
+
+static bool key_step_due(BspKeyId key, uint32_t now)
+{
+    uint32_t idx = (uint32_t)key;
+
+    if (BspKey_TakePressedEvent(key) || BspKey_TakeClickedEvent(key))
+    {
+        s_key_repeat_ms[idx] = now;
+        return true;
+    }
+
+    if (BspKey_IsPressed(key) &&
+        ((uint32_t)(now - s_key_repeat_ms[idx]) >= SPEED_PID_KEY_REPEAT_MS))
+    {
+        s_key_repeat_ms[idx] = now;
+        return true;
+    }
+
+    return false;
+}
+
+void AppTest_Init(void)
+{
+    BspLed_Init();
+    BspKey_Init();
+    BspMotor_Init();
+    (void)BspServo_Init();
+    BspEncoder_Init();
+    BspUart_Init(BSP_UART_BT);
+
+    SystemStatePool_Init(&s_test_pool);
+    Estimation_Init();
+    Motion_Init();
+    DebugTrace_Init();
+    s_test_pool.debug.enabled = true;
+
+    s_pid_target_speed_mps = 0.0f;
+    s_pid_angle_deg = 0.0f;
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+        s_key_repeat_ms[i] = 0U;
+    }
+    update_speed_test_target();
+}
+
+void AppTest_Run(void)
+{
+    static uint32_t last_10ms;
+    static uint32_t last_100ms;
+    uint32_t now = HAL_GetTick();
+
+    s_test_pool.tick_ms = now;
+
+    if ((uint32_t)(now - last_10ms) >= 10U)
+    {
+        last_10ms = now;
+
+        BspKey_Task10ms();
+
+        if (key_step_due(BSP_KEY_1, now))
+        {
+            s_pid_target_speed_mps = 0.0f;
+            update_speed_test_target();
+        }
+
+        if (key_step_due(BSP_KEY_2, now))
+        {
+            s_pid_target_speed_mps =
+                clamp_float(s_pid_target_speed_mps - VEHICLE_DEBUG_SPEED_STEP_MPS,
+                            0.0f,
+                            VEHICLE_MAX_SPEED_MPS);
+            update_speed_test_target();
+        }
+
+        if (key_step_due(BSP_KEY_3, now))
+        {
+            s_pid_target_speed_mps =
+                clamp_float(s_pid_target_speed_mps + VEHICLE_DEBUG_SPEED_STEP_MPS,
+                            -VEHICLE_MAX_SPEED_MPS,
+                            VEHICLE_MAX_SPEED_MPS);
+            update_speed_test_target();
+        }
+
+        if (key_step_due(BSP_KEY_4, now))
+        {
+            s_pid_angle_deg = 0;
+            update_speed_test_target();
+        }
+
+        Estimation_Task10ms(&s_test_pool);
+        Motion_Task10ms(&s_test_pool);
+
+        bool key1_pressed = BspKey_IsPressed(BSP_KEY_1);
+        bool key2_pressed = BspKey_IsPressed(BSP_KEY_2);
+        bool key3_pressed = BspKey_IsPressed(BSP_KEY_3);
+        bool key4_pressed = BspKey_IsPressed(BSP_KEY_4);
+        bool any_key_pressed = key1_pressed || key2_pressed || key3_pressed || key4_pressed;
+
+        BspLed_Set(BSP_LED_1, any_key_pressed ? key1_pressed : (s_pid_target_speed_mps < 0.0f));
+        BspLed_Set(BSP_LED_2, any_key_pressed ? key2_pressed : (s_pid_target_speed_mps == 0.0f));
+        BspLed_Set(BSP_LED_3, any_key_pressed ? key3_pressed : (s_pid_target_speed_mps > 0.0f));
+        BspLed_Set(BSP_LED_STATE,
+                   any_key_pressed ||
+                   (s_pid_target_speed_mps == 0.0f) ||
+                   (s_test_pool.motion.left_pwm != 0) ||
+                   (s_test_pool.motion.right_pwm != 0));
+    }
+
+    if ((uint32_t)(now - last_100ms) >= 100U)
+    {
+        last_100ms = now;
+        DebugTrace_Task100ms(&s_test_pool);
+    }
+}
+
+#endif /* TEST_SPEED_PID */
 
 /* ══════════════════════════════════════════════════════════════
  * 默认：不测试

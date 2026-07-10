@@ -11,12 +11,8 @@
  * ──────────────────────────────────────────────────────────── */
 
 #include "app_main.h"
-
-#if TEST_SELECT != TEST_NONE
 #include "app_test.h"
-#else
 #include "app_tasks.h"
-#endif
 
 #include "system_state_pool.h"
 #include "bsp_buzzer.h"
@@ -38,6 +34,10 @@
 #include "iwdg.h"
 
 #include "stm32g4xx_hal.h"
+
+#ifndef TEST_SELECT
+#error "TEST_SELECT must be defined in app_test.h"
+#endif
 
 /* 全局状态池（唯一跨域数据交换中心） */
 SystemStatePool g_state;

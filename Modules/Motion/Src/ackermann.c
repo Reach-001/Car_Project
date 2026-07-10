@@ -4,29 +4,39 @@
  * 输入：车身速度 speed_mps（m/s）、前轮转角 angle_rad（rad）
  * 输出：左右轮目标速度 L_out / R_out（m/s）
  *
- * 简化模型（低速近似）：
- *   R_turn = wheelbase / tan(angle)
- *   L_speed = speed × (1 - track/(2×R_turn))
- *   R_speed = speed × (1 + track/(2×R_turn))
+ * 简化单轨模型（低速近似）：
+ *   转弯半径 R = wheelbase / tan(angle)
+ *   左轮速度 = speed × (1 - track/2R)
+ *   右轮速度 = speed × (1 + track/2R)
+ * 角度 = 0 → 直线行驶，左右等速。
  *
- * 当 angle ≈ 0 时，tan≈0 → 直线行驶，L=R=speed。
+ * 参数说明：
+ *   VEHICLE_WHEELBASE_M           = 轴距
+ *   VEHICLE_TRACK_WIDTH_M         = 轮距
+ *   VEHICLE_ACKERMANN_RATIO_LIMIT = 左右轮速比例差限幅
  *
- * 标定参数在下层 static，换机械结构只改这里。
+ * 换车/换结构 → 只改 vehicle_config.h 的车辆几何参数。
  * ──────────────────────────────────────────────────────────── */
 
 #include "motion_internal.h"
 
+#include "vehicle_config.h"
+
 #include <math.h>
 
-static const float WHEELBASE_M = 0.18f;   /* 轴距（前后轮轴心距） m */
-static const float TRACK_M    = 0.14f;    /* 轮距（左右轮间距）   m */
+static float clampf(float value, float min_value, float max_value)
+{
+    if (value < min_value) return min_value;
+    if (value > max_value) return max_value;
+    return value;
+}
 
 void Ackermann_Compute(float speed, float angle,
                        float *L_out, float *R_out)
 {
     if (L_out == 0 || R_out == 0) return;
 
-    /* 转角接近 0 → 直行 */
+    /* 转角极小 → 近似直行，避免除零 */
     float abs_angle = (angle < 0.0f) ? -angle : angle;
     if (abs_angle < 0.001f)
     {
@@ -35,14 +45,15 @@ void Ackermann_Compute(float speed, float angle,
         return;
     }
 
-    /* R_turn = wheelbase / tan(angle) */
     float tan_a  = tanf(angle);
     if (tan_a == 0.0f) { *L_out = speed; *R_out = speed; return; }
 
-    float R_turn = WHEELBASE_M / tan_a;
+    float R_turn = VEHICLE_WHEELBASE_M / tan_a;
 
-    /* 左右轮速度 */
-    float ratio = TRACK_M / (2.0f * R_turn);
+    float ratio = VEHICLE_TRACK_WIDTH_M / (2.0f * R_turn);
+    ratio = clampf(ratio,
+                   -VEHICLE_ACKERMANN_RATIO_LIMIT,
+                   VEHICLE_ACKERMANN_RATIO_LIMIT);
     *L_out = speed * (1.0f - ratio);
     *R_out = speed * (1.0f + ratio);
 }

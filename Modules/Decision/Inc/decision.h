@@ -17,8 +17,8 @@
  *   emergency_stop → SYS_MODE_STOP
  *   heartbeat_lost → SYS_MODE_STOP
  *   obstacle_too_close → SYS_MODE_AVOIDANCE
- *   bt_command_ready → 蓝牙命令
  *   key_stop_clicked → SYS_MODE_STOP
+ *   bt_command_ready → 蓝牙命令（speed,angle 默认进入/更新手动目标）
  *   当前模式的持续控制
  *
  * 依赖：无（只读 pool 字段）

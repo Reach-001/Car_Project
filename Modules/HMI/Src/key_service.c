@@ -6,14 +6,16 @@
  *
  * 按键映射：
  *   KEY1 → pool->event.key_stop_clicked   (紧急停车)
- *   KEY2 → pool->event.key_mode_clicked   (模式切换)
- *   KEY3 → pool->event.key_task_clicked   (任务启停)
- *   KEY4 → pool->event.key_user_clicked   (用户自定义)
+ *   KEY2 → pool->event.key_mode_clicked   (手动/巡线切换)
+ *   KEY3 → pool->event.key_task_clicked   (启动巡线任务)
+ *   KEY4 → 短按切换 Debug，长按强制打开 Debug
  * ──────────────────────────────────────────────────────────── */
 
 #include "bsp_key.h"
 #include "hmi_internal.h"
 #include "system_state_pool.h"
+
+#define USER_KEY_LONG_PRESS_MS 800U
 
 void KeyService_Process10ms(SystemStatePool *pool)
 {
@@ -34,8 +36,18 @@ void KeyService_Process10ms(SystemStatePool *pool)
         pool->event.key_task_clicked = true;
     }
 
-    if (BspKey_TakeClickedEvent(BSP_KEY_4))
+    if (BspKey_TakeReleasedEvent(BSP_KEY_4))
     {
-        pool->event.key_user_clicked = true;
+        BspKeyInfo info = BspKey_GetInfo(BSP_KEY_4);
+        if (info.pressed_time_ms >= USER_KEY_LONG_PRESS_MS)
+        {
+            pool->event.key_user_long_pressed = true;
+            pool->debug.enabled = true;
+        }
+        else
+        {
+            pool->event.key_user_clicked = true;
+            pool->debug.enabled = !pool->debug.enabled;
+        }
     }
 }

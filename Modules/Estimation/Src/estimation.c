@@ -1,39 +1,50 @@
-#include "estimation.h"
-
-#include "bsp_encoder.h"
-
 /* ────────────────────────────────────────────────────────────
  * Estimation 域实现
  *
- * 速度公式：speed = delta / PPR / gear_ratio × wheel_circumference / dt
- *   PPR（编码器线数）   = 13 pulses/rev
- *   减速比               = 30:1
- *   轮径                 = 0.065m
- *   周長                 = 0.065 × π ≈ 0.204m
- *   dt                   = 0.01s (10ms Task 周期)
+ * 编码器脉冲 → 速度 m/s。
  *
- * 方向因子：±1，用于修正编码器正负方向。
- * 实车标定时根据"正转=前进"修正 sign。
+ * 速度公式：
+ *   每脉冲行驶距离 = 轮周长 / (编码器线数 × 减速比)
+ *     = π × WHEEL_DIAMETER / (PPR × GEAR_RATIO)
+ *     = 3.1416 × 0.065 / (13 × 20) = 0.000785 m/pulse
+ *   速度 = delta × 米每脉冲 / dt
+ *     = delta × 0.000785 / 0.01 = delta × 0.0785 m/s
+ *
+ * 例：delta=36 → speed ≈ 36 × 0.0785 ≈ 2.83 m/s（偏高，待实车验证）
+ *
+ * 方向符号：根据实车测试调整 ENCODER_SIGN。
+ *   发 MANUAL + 60,0 前进，看 debug CH5/CH8 actual 符号：
+ *     actual 为正 → 保持 +1；actual 为负 → 改为 -1
+ *
+ * 参数说明（全部来自 vehicle_config.h）：
+ *   VEHICLE_WHEEL_DIAMETER_M    = 轮径（m），量实车道
+ *   VEHICLE_ENCODER_PPR         = 编码器每转脉冲数
+ *   VEHICLE_GEAR_RATIO          = 减速比（电机端：轮端）
+ *   VEHICLE_LEFT_ENCODER_SIGN   = 左轮方向符号（±1）
+ *   VEHICLE_RIGHT_ENCODER_SIGN  = 右轮方向符号（±1）
+ *
+ *   任务周期固定 10ms = 0.01s
  * ──────────────────────────────────────────────────────────── */
 
-/* ── 标定参数（全部 static const） ── */
+#include "estimation.h"
 
-static const float  WHEEL_DIAMETER_M        = 0.065f;   /* 轮径 m          */
-static const float  ENCODER_PPR             = 13.0f;    /* 编码器线数      */
-static const float  GEAR_RATIO              = 30.0f;    /* 减速比          */
-static const float  TASK_PERIOD_S           = 0.01f;    /* 10ms 周期       */
-static const int8_t LEFT_DIR_SIGN           =  1;       /* 左轮方向修正    */
-static const int8_t RIGHT_DIR_SIGN          = -1;       /* 右轮前进原始 delta 为负 */
+#include "bsp_encoder.h"
+#include "vehicle_config.h"
 
-/* 预计算常数：每脉冲对应行驶距离（m/pulse） */
+/* ════════════════════════════════════════════════════════════
+ * 预计算参数
+ * ════════════════════════════════════════════════════════════ */
+
+/* Task 周期（s），固定 10ms */
+static const float  TASK_PERIOD_S  = 0.01f;
+
+/* 每脉冲行驶距离 = π × D / (PPR × gear_ratio)，单位 m/pulse */
 static const float  METERS_PER_PULSE =
-    (3.14159265f * WHEEL_DIAMETER_M) / (ENCODER_PPR * GEAR_RATIO);
+    (3.14159265f * VEHICLE_WHEEL_DIAMETER_M) /
+    (VEHICLE_ENCODER_PPR * VEHICLE_GEAR_RATIO);
 
 /* ── 内部状态 ── */
-
 static EstimationState s_state;
-
-/* ── 初始化 ── */
 
 void Estimation_Init(void)
 {
@@ -45,27 +56,24 @@ void Estimation_Init(void)
     s_state.valid               = false;
 }
 
-/* ── 10ms 周期 ── */
-
 void Estimation_Task10ms(SystemStatePool *pool)
 {
     if (pool == 0) return;
 
     BspEncoderSample enc = BspEncoder_Read();
 
-    /* 带方向因子的增量 */
-    int32_t l_delta = enc.left_delta  * LEFT_DIR_SIGN;
-    int32_t r_delta = enc.right_delta * RIGHT_DIR_SIGN;
+    /* 带方向符号的增量 */
+    int32_t l_delta = enc.left_delta  * VEHICLE_LEFT_ENCODER_SIGN;
+    int32_t r_delta = enc.right_delta * VEHICLE_RIGHT_ENCODER_SIGN;
 
-    /* 速度 = (delta × 米每脉冲) / 周期 */
-    s_state.left_speed_mps  = ((float)l_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
-    s_state.right_speed_mps = ((float)r_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
-    s_state.body_speed_mps  = (s_state.left_speed_mps + s_state.right_speed_mps) * 0.5f;
-    s_state.left_encoder_delta  = l_delta;
-    s_state.right_encoder_delta = r_delta;
-    s_state.valid = true;
+    /* speed = delta × m/pulse / dt */
+    s_state.left_speed_mps       = ((float)l_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
+    s_state.right_speed_mps      = ((float)r_delta * METERS_PER_PULSE) / TASK_PERIOD_S;
+    s_state.body_speed_mps       = (s_state.left_speed_mps + s_state.right_speed_mps) * 0.5f;
+    s_state.left_encoder_delta   = l_delta;
+    s_state.right_encoder_delta  = r_delta;
+    s_state.valid                = true;
 
-    /* 写入状态池 */
     pool->estimation.left_speed_mps      = s_state.left_speed_mps;
     pool->estimation.right_speed_mps     = s_state.right_speed_mps;
     pool->estimation.body_speed_mps      = s_state.body_speed_mps;
@@ -73,8 +81,6 @@ void Estimation_Task10ms(SystemStatePool *pool)
     pool->estimation.right_encoder_delta = s_state.right_encoder_delta;
     pool->estimation.valid               = true;
 }
-
-/* ── 状态查询 ── */
 
 EstimationState Estimation_GetState(void)
 {

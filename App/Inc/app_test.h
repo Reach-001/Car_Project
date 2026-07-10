@@ -13,6 +13,7 @@
  *   6 = 编码器测试
  *   7 = GPIO 传感器测试（循迹 + 超声波）
  *   8 = UART 回环测试
+ *   9 = 速度环 PID 标定测试
  *
  * 测试结果反馈：
  *   通过 → 蜂鸣器 OK 提示音 + STATE_LED 长亮
@@ -29,9 +30,12 @@
 #define TEST_ENCODER    6
 #define TEST_SENSOR     7
 #define TEST_UART       8
+#define TEST_SPEED_PID  9
 
 /* 选择当前要运行的测试 */
 #define TEST_SELECT  TEST_NONE
+
+
 
 void AppTest_Init(void);
 void AppTest_Run(void);

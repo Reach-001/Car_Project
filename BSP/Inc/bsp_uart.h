@@ -11,8 +11,9 @@
  *       Task 侧通过 ReadByte / Available 轮询 DMA 写指针，
  *       将增量数据搬到 RingBuffer，短包也能及时读到。
  *
- * 发送：DMA 异步，单缓冲
+ * 发送：DMA 异步，驱动内部缓冲
  *       WriteBuffer 启动 DMA 发送立即返回
+ *       调用时会先复制数据，调用方缓冲可立即释放
  *       TxDone 查询是否发送完毕
  *       WriteString 内部用 WriteBuffer，不阻塞等待
  *

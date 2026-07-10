@@ -1,39 +1,62 @@
-#include "bsp_servo.h"
-
-#include "tim.h"     /* htim1, TIM_CHANNEL_3 */
-
 /* ────────────────────────────────────────────────────────────
  * 舵机 PWM 驱动实现
  *
- * TIM1 配置：Prescaler=169, Period=19999
- *           170MHz / 170 / 20000 = 50Hz
- * 脉宽范围：1000us ~ 2000us（对应 CCR 1000~2000）
- * 中位 1500us，半幅 500us
+ * TIM1 参数（CubeMX IOC 配置）：
+ *   Prescaler = 169
+ *   Period    = 19999
+ *   频率      = 170MHz / (169+1) / (19999+1) = 50Hz
+ *   周期      = 20ms
+ *   分辨率    = 1us/CCR unit（170M/170=1MHz）
+ *
+ * 脉宽 → CCR 映射：
+ *   CCR = pulse_us（计数频率 1MHz，1 CCR = 1us）
+ *
+ * 舵机标准范围：1000us（最左）～ 1500us（中位）～ 2000us（最右）。
+ * 中位、行程、限幅统一从 vehicle_config.h 取，本文件不做硬编码。
+ *
+ * 安全保护（双层）：
+ *   第一层：本函数 steer_to_compare() → ±1000 软件限幅
+ *   第二层：vehile_config.h 的 SERVO_MIN_US/MAX_US 硬件硬限制
+ *   即使上层 Motion 算出非法值，BSP 层绝不允许输出超出 1000~2000us 的脉冲。
+ *
+ * 参数说明（来自 vehicle_config.h）：
+ *   VEHICLE_SERVO_CENTER_US = 中位脉宽。舵机归中时 = 1500us
+ *   VEHICLE_SERVO_RANGE_US  = 半幅行程。±1000‰ 对应 ±500us
+ *   VEHICLE_SERVO_MIN_US    = 硬件最小脉宽。舵机绝不超过此值
+ *   VEHICLE_SERVO_MAX_US    = 硬件最大脉宽。舵机绝不超过此值
  * ──────────────────────────────────────────────────────────── */
 
-#define SERVO_CENTER_US 1500            /* 中位脉宽 1.5ms            */
-#define SERVO_RANGE_US  500             /* 半幅范围 0.5ms            */
-#define SERVO_MIN_US    (SERVO_CENTER_US - SERVO_RANGE_US)  /* 1000us */
-#define SERVO_MAX_US    (SERVO_CENTER_US + SERVO_RANGE_US)  /* 2000us */
+#include "bsp_servo.h"
 
-static int16_t s_steer_permille;        /* 当前转角（千分比） */
-static bool    s_available;             /* TIM1 初始化是否成功 */
+#include "tim.h"     /* htim1, TIM_CHANNEL_3 */
+#include "vehicle_config.h"
 
-/* 千分比（-1000~1000）→ TIM1 CCR 比较值（脉宽 us） */
+/* ════════════════════════════════════════════════════════════
+ * 安全限幅参数
+ * ════════════════════════════════════════════════════════════ */
+
+#define STEER_PERMILLE_MAX  1000            /* 千分比上限（对应最右极限） */
+#define STEER_PERMILLE_MIN -1000            /* 千分比下限（对应最左极限） */
+
+static int16_t s_steer_permille;            /* 当前转角（千分比）          */
+static bool    s_available;                 /* TIM1 是否可用               */
+
+/* 千分比 → 脉宽 us → CCR */
 static uint32_t steer_to_compare(int16_t steer_permille)
 {
     int32_t pulse_us;
 
-    /* 软件限幅 */
-    if (steer_permille > 1000)  { steer_permille = 1000; }
-    else if (steer_permille < -1000) { steer_permille = -1000; }
+    /* 第一层：软件限幅（千分比） */
+    if      (steer_permille > STEER_PERMILLE_MAX)  steer_permille = STEER_PERMILLE_MAX;
+    else if (steer_permille < STEER_PERMILLE_MIN)  steer_permille = STEER_PERMILLE_MIN;
 
-    /* pulse_us = 1500 + steer × 500 / 1000 */
-    pulse_us = SERVO_CENTER_US + ((int32_t)steer_permille * SERVO_RANGE_US) / 1000;
+    /* 千分比 → 脉宽：1500 + steer×500/1000 */
+    pulse_us = (int32_t)VEHICLE_SERVO_CENTER_US +
+               ((int32_t)steer_permille * (int32_t)VEHICLE_SERVO_RANGE_US) / 1000;
 
-    /* 硬件绝对安全限幅（即使上层计算错误，BSP 层也保护舵机） */
-    if      (pulse_us < SERVO_MIN_US) { pulse_us = SERVO_MIN_US; }
-    else if (pulse_us > SERVO_MAX_US) { pulse_us = SERVO_MAX_US; }
+    /* 第二层：硬件绝对安全限幅（即使上层传了错误值也不越界） */
+    if      (pulse_us < (int32_t)VEHICLE_SERVO_MIN_US) pulse_us = (int32_t)VEHICLE_SERVO_MIN_US;
+    else if (pulse_us > (int32_t)VEHICLE_SERVO_MAX_US) pulse_us = (int32_t)VEHICLE_SERVO_MAX_US;
 
     return (uint32_t)pulse_us;
 }
@@ -43,31 +66,21 @@ static uint32_t steer_to_compare(int16_t steer_permille)
 bool BspServo_Init(void)
 {
     s_steer_permille = 0;
-
-    /* 启动 TIM1 CH3 PWM */
     s_available = (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3) == HAL_OK);
-
-    /* 默认归中位 */
-    BspServo_SetSteerPermille(0);
+    BspServo_SetSteerPermille(0);       /* 上电归中位 */
     return s_available;
 }
 
-bool BspServo_IsAvailable(void)
-{
-    return s_available;
-}
+bool BspServo_IsAvailable(void) { return s_available; }
 
 /* ── 驱动接口 ── */
 
 void BspServo_SetSteerPermille(int16_t steer_permille)
 {
-    /* 软件限幅（第一层） */
-    if      (steer_permille > 1000)  { steer_permille = 1000; }
-    else if (steer_permille < -1000) { steer_permille = -1000; }
+    if      (steer_permille > STEER_PERMILLE_MAX)  steer_permille = STEER_PERMILLE_MAX;
+    else if (steer_permille < STEER_PERMILLE_MIN)  steer_permille = STEER_PERMILLE_MIN;
 
     s_steer_permille = steer_permille;
-
-    /* 舵机不可用时跳过写寄存器 */
     if (s_available)
     {
         __HAL_TIM_SET_COMPARE(&htim1, TIM_CHANNEL_3,

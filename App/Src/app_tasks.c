@@ -4,8 +4,9 @@
  * 10ms 硬实时槽：Estimation → Motion
  *   （先估计速度，再执行控制闭环）
  * 20ms 逻辑槽：HMI_Key → Sensor → Comm → Decision
- *   （按键先采集事件，传感器和通信更新数据，Decision 最后
- *     消费本轮所有事件并计算目标）
+ *   （按键先采集事件，传感器和通信更新数据，
+ *     Decision 最后计算目标）
+ * Debug 曲线：100ms 输出，默认关闭，避免干扰普通蓝牙控制。
  * 500ms 低优先槽：HMI
  *   （LED/蜂鸣器更新，不影响控制实时性）
  * ──────────────────────────────────────────────────────────── */
@@ -61,7 +62,7 @@ static void Task_Decision20ms(void *ctx)
 {
     SystemStatePool *pool = (SystemStatePool *)ctx;
     Decision_Task20ms(pool);
-    /* Decision 消费完事件后清理 */
+    /* 本周期消费者处理完成后，统一清理一次性事件 */
     SystemStatePool_ClearCycleEvents(pool);
 }
 

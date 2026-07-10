@@ -43,9 +43,18 @@ void Comm_Task20ms(SystemStatePool *pool)
     BtCommand bt_cmd;
     if (BtLink_TakeCommand(&bt_cmd))
     {
-        pool->comm.bt_command          = bt_cmd;
-        pool->event.bt_command_ready   = true;
-        s_state.bt_cmd                 = bt_cmd;
+        if (bt_cmd.type == BT_COMMAND_DEBUG_OUTPUT)
+        {
+            pool->debug.enabled = (bt_cmd.arg0 != 0);
+            pool->comm.debug_command = bt_cmd;
+            s_state.bt_cmd           = bt_cmd;
+        }
+        else
+        {
+            pool->comm.bt_command        = bt_cmd;
+            pool->event.bt_command_ready = true;
+            s_state.bt_cmd               = bt_cmd;
+        }
     }
 
     BtLink_GetStatus(&s_state.bt_connected, &s_state.bt_last_rx_ms, &s_state.bt_rx_bytes);

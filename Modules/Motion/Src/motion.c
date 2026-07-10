@@ -3,6 +3,7 @@
 
 #include "bsp_motor.h"
 #include "bsp_servo.h"
+#include "vehicle_config.h"
 
 /* ────────────────────────────────────────────────────────────
  * Motion 域聚合入口
@@ -13,12 +14,19 @@
 
 /* ── 安全限幅参数 ── */
 
-#define SPEED_MAX_MPS     1.0f      /* 最大线速度 m/s     */
-#define STEER_MAX_RAD     0.5f      /* 最大转角 rad       */
+#define SPEED_MAX_MPS     VEHICLE_MAX_SPEED_MPS
 #define PWM_MAX           1000      /* PWM 千分比上限     */
 #define PWM_MIN           -1000     /* PWM 千分比下限     */
-#define SERVO_MIN_US      1000U     /* 舵机最小脉宽 us    */
-#define SERVO_MAX_US      2000U     /* 舵机最大脉宽 us    */
+
+static float steer_cmd_left_limit_rad(void)
+{
+    return VEHICLE_STEER_LEFT_CMD_LIMIT_RAD;
+}
+
+static float steer_cmd_right_limit_rad(void)
+{
+    return VEHICLE_STEER_RIGHT_CMD_LIMIT_RAD;
+}
 
 static MotionState s_state;
 static bool        s_emergency_brake;
@@ -33,7 +41,7 @@ void Motion_Init(void)
     s_state.right_target_mps  = 0.0f;
     s_state.left_pwm          = 0;
     s_state.right_pwm         = 0;
-    s_state.servo_pulse_us    = 1500U;
+    s_state.servo_pulse_us    = VEHICLE_SERVO_CENTER_US;
     s_state.limited           = false;
     s_emergency_brake         = false;
 
@@ -74,8 +82,8 @@ void Motion_Task10ms(SystemStatePool *pool)
     if      (target_speed >  SPEED_MAX_MPS)  target_speed =  SPEED_MAX_MPS;
     else if (target_speed < -SPEED_MAX_MPS)  target_speed = -SPEED_MAX_MPS;
 
-    if      (target_steer >  STEER_MAX_RAD)  target_steer =  STEER_MAX_RAD;
-    else if (target_steer < -STEER_MAX_RAD)  target_steer = -STEER_MAX_RAD;
+    if      (target_steer >  steer_cmd_right_limit_rad())  target_steer =  steer_cmd_right_limit_rad();
+    else if (target_steer < -steer_cmd_left_limit_rad())   target_steer = -steer_cmd_left_limit_rad();
 
     /* ── 步骤 2：阿克曼左右轮分配 ── */
     float L_target, R_target;
@@ -98,14 +106,34 @@ void Motion_Task10ms(SystemStatePool *pool)
                     R_pwm == PWM_MAX || R_pwm == PWM_MIN);
 
     /* ── 步骤 5：舵机计算 ── */
-    uint16_t pulse = (uint16_t)(1500 + (int32_t)(target_steer * 500.0f / STEER_MAX_RAD));
-    if (pulse < SERVO_MIN_US) pulse = SERVO_MIN_US;
-    if (pulse > SERVO_MAX_US) pulse = SERVO_MAX_US;
+    float steer_deg = target_steer / VEHICLE_DEG_TO_RAD;
+    float permille;
+    uint16_t pulse;
+
+    if (VEHICLE_MANUAL_INPUT_MAX_DEG <= 0.0f)
+    {
+        permille = 0.0f;
+    }
+    else
+    {
+        /* 机械角只负责限幅和 Ackermann 计算；舵机输出按蓝牙输入满量程缩放。
+         * 例如 INPUT_MAX=45，机械极限=1° 时，满命令只输出 1/45 行程，避免顶死。 */
+        permille = (steer_deg / VEHICLE_MANUAL_INPUT_MAX_DEG) * 1000.0f;
+    }
+
+    if (permille > 1000.0f) permille = 1000.0f;
+    if (permille < -1000.0f) permille = -1000.0f;
+
+    pulse =
+        (uint16_t)(VEHICLE_SERVO_CENTER_US +
+                   (int32_t)(permille * (float)VEHICLE_SERVO_RANGE_US / 1000.0f));
+    if (pulse < VEHICLE_SERVO_MIN_US) pulse = VEHICLE_SERVO_MIN_US;
+    if (pulse > VEHICLE_SERVO_MAX_US) pulse = VEHICLE_SERVO_MAX_US;
 
     /* ── 步骤 6：写 BSP Actuator ── */
     BspMotor_SetDuty(BSP_MOTOR_LEFT,  L_pwm);
     BspMotor_SetDuty(BSP_MOTOR_RIGHT, R_pwm);
-    BspServo_SetSteerPermille((int16_t)((target_steer / STEER_MAX_RAD) * 1000.0f));
+    BspServo_SetSteerPermille((int16_t)permille);
 
     /* ── 更新状态 ── */
     s_state.target_speed_mps  = target_speed;
