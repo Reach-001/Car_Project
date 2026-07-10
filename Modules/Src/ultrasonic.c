@@ -4,6 +4,7 @@
 #include "stm32g4xx_hal.h"
 
 #define ULTRASONIC_TRIGGER_INTERVAL_MS 60U
+#define ULTRASONIC_ECHO_START_TIMEOUT_US 3000U
 #define ULTRASONIC_TIMEOUT_US 30000U
 #define ULTRASONIC_SOUND_SPEED_MM_PER_US_X1000 343U
 
@@ -11,6 +12,7 @@ static volatile uint32_t s_echo_start_us;
 static volatile uint32_t s_echo_width_us;
 static volatile bool s_echo_done;
 static volatile bool s_waiting_echo;
+static bool s_dwt_ready;
 static uint32_t s_triggered_us;
 static uint32_t s_last_trigger_ms;
 static UltrasonicSample s_sample;
@@ -20,6 +22,7 @@ static void dwt_init(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
     DWT->CYCCNT = 0U;
     DWT->CTRL |= DWT_CTRL_CYCCNTENA_Msk;
+    s_dwt_ready = ((DWT->CTRL & DWT_CTRL_CYCCNTENA_Msk) != 0U);
 }
 
 static uint32_t micros(void)
@@ -34,15 +37,89 @@ static uint32_t micros(void)
 
 static void delay_us(uint32_t us)
 {
-    uint32_t start = micros();
-    while ((uint32_t)(micros() - start) < us)
+    if (s_dwt_ready)
     {
+        uint32_t start = micros();
+        uint32_t guard = (SystemCoreClock / 1000000U) * us * 8U + 1000U;
+        bool guard_expired = false;
+
+        while ((uint32_t)(micros() - start) < us)
+        {
+            if (guard == 0U)
+            {
+                guard_expired = true;
+                break;
+            }
+            --guard;
+        }
+
+        if (!guard_expired)
+        {
+            return;
+        }
     }
+
+    volatile uint32_t loops = (SystemCoreClock / 1000000U) * us / 4U;
+    while (loops-- > 0U)
+    {
+        __NOP();
+    }
+}
+
+static bool wait_echo_state(GPIO_PinState target, uint32_t timeout_us)
+{
+    uint32_t start = micros();
+    uint32_t guard = (SystemCoreClock / 1000000U) * timeout_us * 8U + 1000U;
+
+    while (HAL_GPIO_ReadPin(HCSR04_ECHO_GPIO_Port, HCSR04_ECHO_Pin) != target)
+    {
+        if (s_dwt_ready && ((uint32_t)(micros() - start) >= timeout_us))
+        {
+            return false;
+        }
+
+        if (guard == 0U)
+        {
+            return false;
+        }
+        --guard;
+    }
+
+    return true;
+}
+
+static bool measure_once(uint32_t *echo_us)
+{
+    if (echo_us == 0)
+    {
+        return false;
+    }
+
+    HAL_GPIO_WritePin(HCSR04_TRIG_GPIO_Port, HCSR04_TRIG_Pin, GPIO_PIN_RESET);
+    delay_us(2U);
+    HAL_GPIO_WritePin(HCSR04_TRIG_GPIO_Port, HCSR04_TRIG_Pin, GPIO_PIN_SET);
+    delay_us(10U);
+    HAL_GPIO_WritePin(HCSR04_TRIG_GPIO_Port, HCSR04_TRIG_Pin, GPIO_PIN_RESET);
+
+    if (!wait_echo_state(GPIO_PIN_SET, ULTRASONIC_ECHO_START_TIMEOUT_US))
+    {
+        return false;
+    }
+
+    uint32_t start = micros();
+    if (!wait_echo_state(GPIO_PIN_RESET, ULTRASONIC_TIMEOUT_US))
+    {
+        return false;
+    }
+
+    *echo_us = (uint32_t)(micros() - start);
+    return true;
 }
 
 void Ultrasonic_Init(void)
 {
     dwt_init();
+    HAL_NVIC_DisableIRQ(EXTI15_10_IRQn);
     HAL_GPIO_WritePin(HCSR04_TRIG_GPIO_Port, HCSR04_TRIG_Pin, GPIO_PIN_RESET);
     s_echo_start_us = 0U;
     s_echo_width_us = 0U;
@@ -98,30 +175,29 @@ void Ultrasonic_OnEchoEdge(void)
 void Ultrasonic_Task10ms(void)
 {
     uint32_t now_ms = HAL_GetTick();
+    uint32_t echo = 0U;
 
-    if (s_echo_done)
+    if ((uint32_t)(now_ms - s_last_trigger_ms) < ULTRASONIC_TRIGGER_INTERVAL_MS)
     {
-        uint32_t echo = s_echo_width_us;
-        s_echo_done = false;
+        return;
+    }
+
+    s_last_trigger_ms = now_ms;
+    s_sample.status = ULTRASONIC_STATUS_WAIT_ECHO;
+
+    if (measure_once(&echo))
+    {
         s_sample.echo_us = echo;
         s_sample.distance_mm = (uint16_t)((echo * ULTRASONIC_SOUND_SPEED_MM_PER_US_X1000) / 2000U);
-        s_sample.last_update_ms = now_ms;
+        s_sample.last_update_ms = HAL_GetTick();
         s_sample.status = ULTRASONIC_STATUS_READY;
         s_sample.valid = true;
+        return;
     }
 
-    if (s_waiting_echo && ((uint32_t)(micros() - s_triggered_us) > ULTRASONIC_TIMEOUT_US))
-    {
-        s_waiting_echo = false;
-        s_sample.status = ULTRASONIC_STATUS_TIMEOUT;
-        s_sample.valid = false;
-        s_sample.last_update_ms = now_ms;
-    }
-
-    if (!s_waiting_echo && ((uint32_t)(now_ms - s_last_trigger_ms) >= ULTRASONIC_TRIGGER_INTERVAL_MS))
-    {
-        Ultrasonic_Trigger();
-    }
+    s_sample.status = ULTRASONIC_STATUS_TIMEOUT;
+    s_sample.valid = false;
+    s_sample.last_update_ms = HAL_GetTick();
 }
 
 UltrasonicSample Ultrasonic_GetSample(void)

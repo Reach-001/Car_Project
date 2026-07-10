@@ -9,11 +9,12 @@
  * 右电机：PB0(TIM3_CH3) 正转 / PB1(TIM3_CH4) 反转
  *
  * TIM3 频率：170MHz / (16+1) / (499+1) = 20kHz
- * duty 计算：duty_permille × ARR / 1000 = duty × 499 / 1000
+ * duty 计算：duty_permille × (ARR + 1) / 1000 = duty × 500 / 1000
  * ──────────────────────────────────────────────────────────── */
 
 #define MOTOR_DUTY_MAX   1000    /* 千分比上限（对应 100% 占空比） */
 #define MOTOR_TIM_PERIOD 499U    /* TIM3 ARR 值（CubeMX 配置）     */
+#define MOTOR_TIM_COUNTS (MOTOR_TIM_PERIOD + 1U)
 
 /* 将千分比 duty 转换为 TIM3 CCR 比较值 */
 static uint32_t duty_to_compare(int16_t duty_permille)
@@ -30,7 +31,7 @@ static uint32_t duty_to_compare(int16_t duty_permille)
         duty = MOTOR_DUTY_MAX;
     }
 
-    return (uint32_t)((duty * (int32_t)MOTOR_TIM_PERIOD) / MOTOR_DUTY_MAX);
+    return (uint32_t)((duty * (int32_t)MOTOR_TIM_COUNTS) / MOTOR_DUTY_MAX);
 }
 
 /* ── 初始化 ── */
@@ -67,13 +68,13 @@ void BspMotor_SetDuty(BspMotorId motor, int16_t duty_permille)
 
     if (motor == BSP_MOTOR_LEFT)
     {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, forward);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, reverse);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, reverse);   /* CH1=IN1 → 反转 */
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, forward);   /* CH2=IN2 → 正转 */
     }
     else  /* BSP_MOTOR_RIGHT */
     {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, forward);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, reverse);
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, reverse);   /* CH3=IN1 → 反转 */
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_4, forward);   /* CH4=IN2 → 正转 */
     }
 }
 
