@@ -7,7 +7,7 @@
  * 按键映射：
  *   KEY1 → pool->event.key_stop_clicked   (紧急停车)
  *   KEY2 → pool->event.key_mode_clicked   (手动/巡线切换)
- *   KEY3 → pool->event.key_task_clicked   (启动巡线任务)
+ *   KEY3 → pool->event.key_task_clicked   (普通循线 / K230循线任务切换)
  *   KEY4 → 短按切换 Debug，长按强制打开 Debug
  * ──────────────────────────────────────────────────────────── */
 

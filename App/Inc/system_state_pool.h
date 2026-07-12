@@ -41,7 +41,7 @@ typedef enum
 {
     AUTO_TASK_NONE = 0,             /* 无自动任务           */
     AUTO_TASK_LINE_FOLLOW = 1,      /* 巡线                 */
-    AUTO_TASK_LINE_FOLLOW_OBSTACLE, /* 巡线 + 避障预留       */
+    AUTO_TASK_LINE_FOLLOW_K230,     /* 巡线 + K230 指令控制   */
     AUTO_TASK_INSPECTION            /* 巡检预留             */
 } SystemAutoTask;
 
@@ -123,7 +123,11 @@ typedef enum
     K230_RESULT_LINE,
     K230_RESULT_TARGET,
     K230_RESULT_MARKER,
-    K230_RESULT_CUSTOM
+    K230_RESULT_CUSTOM,
+    K230_RESULT_CMD_STOP,       /* S:n，停车 n 秒              */
+    K230_RESULT_CMD_SPEED,      /* V:n，视觉限速/恢复速度       */
+    K230_RESULT_CMD_PARK,       /* P:n，1=倒车入库，2=侧方停车  */
+    K230_RESULT_CMD_TURN        /* L/R:n，value0=-1左/+1右      */
 } K230ResultType;
 
 typedef struct

@@ -11,8 +11,9 @@
  * 不在此层做滤波、单位换算或逻辑判断，这些属于 Modules 层职责。
  *
  * 传感器列表：
- *   五路循迹：PB3=TRACK_1, PB4=TRACK_2, PB5=TRACK_3,
- *             PB8=TRACK_4, PB9=TRACK_5（黑线 = 高电平）
+ *   五路循迹：按车体前进方向看，从左到右为 TRACK_1/2/3/4/5。
+ *             PB3=TRACK_1, PB4=TRACK_2, PB5=TRACK_3,
+ *             PB8=TRACK_4, PB9=TRACK_5（当前模块：高电平 = 白底）
  *             注意：PB8 同时是 BOOT0，上电复位时不能被外部拉高。
  *   超声波：  PB2=HCSR04_TRIG（触发输出，10us 高脉冲）
  *             PB11=HCSR04_ECHO（回波输入，EXTI 双边沿中断）
@@ -28,7 +29,7 @@ void BspGpioSensor_Init(void);
 /** 五路循迹原始读数 */
 typedef struct
 {
-    uint8_t bits;        /* bit[0..4] 对应传感器 1~5，1=检测到黑线 */
+    uint8_t bits;        /* bit[0..4] 对应传感器 1~5，1=GPIO 高电平 */
     bool    sensor[5];   /* sensor[0..4] 对应传感器 1~5              */
 } BspTrackRaw;
 

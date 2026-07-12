@@ -15,6 +15,7 @@
  *   VEHICLE_WHEELBASE_M           = 轴距
  *   VEHICLE_TRACK_WIDTH_M         = 轮距
  *   VEHICLE_ACKERMANN_RATIO_LIMIT = 左右轮速比例差限幅
+ *   VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS = 转弯内轮最低目标速度
  *
  * 换车/换结构 → 只改 vehicle_config.h 的车辆几何参数。
  * ──────────────────────────────────────────────────────────── */
@@ -30,6 +31,25 @@ static float clampf(float value, float min_value, float max_value)
     if (value < min_value) return min_value;
     if (value > max_value) return max_value;
     return value;
+}
+
+static float apply_inner_min_speed(float body_speed, float wheel_speed)
+{
+    float abs_body = (body_speed < 0.0f) ? -body_speed : body_speed;
+    float abs_wheel = (wheel_speed < 0.0f) ? -wheel_speed : wheel_speed;
+
+    if (abs_body < VEHICLE_SPEED_PI_TARGET_DEADBAND)
+    {
+        return 0.0f;
+    }
+
+    if (abs_wheel >= VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS)
+    {
+        return wheel_speed;
+    }
+
+    return (body_speed >= 0.0f) ? VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS
+                                : -VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS;
 }
 
 void Ackermann_Compute(float speed, float angle,
@@ -59,4 +79,13 @@ void Ackermann_Compute(float speed, float angle,
                    VEHICLE_ACKERMANN_RATIO_LIMIT);
     *L_out = speed * (1.0f - ratio);
     *R_out = speed * (1.0f + ratio);
+
+    if (angle < 0.0f)
+    {
+        *L_out = apply_inner_min_speed(speed, *L_out);
+    }
+    else
+    {
+        *R_out = apply_inner_min_speed(speed, *R_out);
+    }
 }

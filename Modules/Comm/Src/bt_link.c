@@ -243,7 +243,8 @@ bool BtLink_TakeCommand(BtCommand *cmd)
 
 void BtLink_GetStatus(bool *conn, uint32_t *last, uint32_t *cnt)
 {
-    if (conn)  *conn  = ((uint32_t)(HAL_GetTick() - s_last_rx_ms) < 2000U);
+    if (conn)  *conn  = (s_last_rx_ms != 0U) &&
+                        ((uint32_t)(HAL_GetTick() - s_last_rx_ms) < 2000U);
     if (last)  *last  = s_last_rx_ms;
     if (cnt)   *cnt   = s_rx_count;
 }

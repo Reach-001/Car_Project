@@ -14,14 +14,14 @@
  *       不操作任何硬件，只写 pool->mode + pool->target。
  *
  * 仲裁优先级（从高到低）：
- *   emergency_stop → SYS_MODE_STOP
+ *   emergency_stop → SYS_MODE_ERROR
  *   heartbeat_lost → SYS_MODE_STOP
- *   obstacle_too_close → SYS_MODE_AVOIDANCE
  *   key_stop_clicked → SYS_MODE_STOP
+ *   key_mode_clicked / key_task_clicked → 按键模式切换
  *   bt_command_ready → 蓝牙命令（speed,angle 默认进入/更新手动目标）
  *   当前模式的持续控制
  *
- * 依赖：无（只读 pool 字段）
+ * 依赖：SystemStatePool + HAL_GetTick
  * 禁止：调用任何 BSP 函数、Motion、Comm、Sensor
  * ──────────────────────────────────────────────────────────── */
 

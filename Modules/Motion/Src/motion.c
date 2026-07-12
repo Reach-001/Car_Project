@@ -36,30 +36,36 @@ static float absf_local(float value)
 
 static bool limit_wheel_targets(float *left_mps, float *right_mps)
 {
-    float left_abs;
-    float right_abs;
-    float max_abs;
-    float scale;
+    bool limited = false;
 
     if ((left_mps == 0) || (right_mps == 0))
     {
         return false;
     }
 
-    left_abs  = absf_local(*left_mps);
-    right_abs = absf_local(*right_mps);
-    max_abs   = (left_abs > right_abs) ? left_abs : right_abs;
-
-    if (max_abs <= SPEED_MAX_MPS)
+    if (*left_mps > SPEED_MAX_MPS)
     {
-        return false;
+        *left_mps = SPEED_MAX_MPS;
+        limited = true;
+    }
+    else if (*left_mps < -SPEED_MAX_MPS)
+    {
+        *left_mps = -SPEED_MAX_MPS;
+        limited = true;
     }
 
-    /* 阿克曼差速后按同一比例缩放，保留内外轮速度比例，避免外侧轮目标超出驱动上限。 */
-    scale = SPEED_MAX_MPS / max_abs;
-    *left_mps  *= scale;
-    *right_mps *= scale;
-    return true;
+    if (*right_mps > SPEED_MAX_MPS)
+    {
+        *right_mps = SPEED_MAX_MPS;
+        limited = true;
+    }
+    else if (*right_mps < -SPEED_MAX_MPS)
+    {
+        *right_mps = -SPEED_MAX_MPS;
+        limited = true;
+    }
+
+    return limited;
 }
 
 static float steer_to_servo_permille(float target_steer_rad)

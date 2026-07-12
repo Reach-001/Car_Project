@@ -23,7 +23,7 @@ BspTrackRaw BspGpioSensor_ReadTrack(void)
 {
     BspTrackRaw raw;
 
-    /* 逐路读取 GPIO 电平（高 = 黑线检测） */
+    /* 逐路读取原始 GPIO 电平；当前循迹模块高电平表示白底。 */
     raw.sensor[0] = (HAL_GPIO_ReadPin(TRACK_1_GPIO_Port, TRACK_1_Pin) == GPIO_PIN_SET);
     raw.sensor[1] = (HAL_GPIO_ReadPin(TRACK_2_GPIO_Port, TRACK_2_Pin) == GPIO_PIN_SET);
     raw.sensor[2] = (HAL_GPIO_ReadPin(TRACK_3_GPIO_Port, TRACK_3_Pin) == GPIO_PIN_SET);

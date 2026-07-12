@@ -24,6 +24,12 @@
 /* 车身最大允许线速度（m/s），前进和后退对称。实车先设 1.0，稳了再逐步提高 */
 #define VEHICLE_MAX_SPEED_MPS           1.50f
 
+/* 自动任务启动延时（ms）。切到非手动任务后先等待，避免模式切换瞬间小车立刻动作。 */
+#define VEHICLE_AUTO_START_DELAY_MS     1000U
+
+/* K230 限速指令的最低运行速度（m/s）。V:10 用于限速通行，不复用找线速度。 */
+#define VEHICLE_K230_MIN_SPEED_MPS      0.20f
+
 /* 前轮三点标定（单位：度）
  *   CENTER = 居中修正量。0° 对应舵机实际约 90°，改为 1° 表示在 90° 基础上加 1° 修正。
  *   LEFT   = 相对居中位置的最左机械角
@@ -36,9 +42,9 @@
  * 超出 INPUT_MAX 的角度被 clamp 到机械极限，不会顶死。
  *
  * 舵机实际输出角 = CENTER + 目标转向角。 */
-#define VEHICLE_STEER_CENTER_DEG        2.0f           /* 居中修正量（度）     */
-#define VEHICLE_STEER_LEFT_MAX_DEG     -28.0f          /* 相对居中的最左角     */
-#define VEHICLE_STEER_RIGHT_MAX_DEG     28.0f          /* 相对居中的最右角     */
+#define VEHICLE_STEER_CENTER_DEG        0.9f           /* 居中修正量（度）     */
+#define VEHICLE_STEER_LEFT_MAX_DEG     -30.0f          /* 相对居中的最左角     */
+#define VEHICLE_STEER_RIGHT_MAX_DEG     34.0f          /* 相对居中的最右角     */
 
 /* 蓝牙输入角度最大值（度）。与机械极限一致，保证线性映射到边界 */
 #define VEHICLE_MANUAL_INPUT_MAX_DEG    45.0f           /* 蓝牙输入±45° → 轮子打满 */
@@ -61,15 +67,33 @@
  * 例如 0.60 表示内外轮速度最多相差 ±60%，防止大角度时内侧轮目标速度过小或反向。 */
 #define VEHICLE_ACKERMANN_RATIO_LIMIT   0.60f
 
+/* 转弯内轮最小目标速度（m/s）。低于该值时实车内轮容易卡在静摩擦区。 */
+#define VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS 0.25f
+
 /* ══════════════════════════════════════════════════════════════
  * 第 3 类：巡线控制参数（Decision 域使用）
  * ══════════════════════════════════════════════════════════════ */
 
-/* 巡线基础速度（m/s）。该值是直线段目标速度，弯道会按误差自动降速。 */
-#define VEHICLE_LINE_FOLLOW_SPEED_MPS        0.80f
+/* 循迹探头电平极性参数表：
+ *   当前实车模块：全高 = 白底，黑线 = 低电平 → 填 0
+ *   另一类模块：  白底 = 低电平，黑线 = 高电平 → 填 1
+ *
+ * 注意：上层 track_bits 始终表示“检测到黑线”，不直接表示 GPIO 原始电平。 */
+#define VEHICLE_TRACK_BLACK_LEVEL_HIGH       0
 
-/* 巡线弯道最低速度（m/s）。误差越大速度越接近该值，避免大弯冲出线。 */
-#define VEHICLE_LINE_FOLLOW_MIN_SPEED_MPS    0.20f
+/* 五路循迹权重（从左到右 TRACK_1~5）。
+ * 权重表示黑线相对车体中心的位置误差，不是舵机角度；Decision 再用 KP/KD 换算成转向角。 */
+#define VEHICLE_TRACK_WEIGHT_1              -1000
+#define VEHICLE_TRACK_WEIGHT_2              -300
+#define VEHICLE_TRACK_WEIGHT_3                  0
+#define VEHICLE_TRACK_WEIGHT_4               300
+#define VEHICLE_TRACK_WEIGHT_5               1000
+
+/* 巡线基础速度（m/s）。实车标定阶段先低速，确认不跑出赛道后再逐步提高。 */
+#define VEHICLE_LINE_FOLLOW_SPEED_MPS        0.45f
+
+/* 巡线最低运动速度（m/s）。实车低于 0.2m/s 无法稳定克服静摩擦。 */
+#define VEHICLE_LINE_FOLLOW_MIN_SPEED_MPS    0.35f
 
 /* 循迹误差到转向角的比例。track_error 范围约 -2000~+2000。
  * STEER_SIGN 用于适配传感器安装方向：方向反了只改 +1/-1。 */
@@ -77,16 +101,30 @@
 #define VEHICLE_LINE_FOLLOW_KP               0.0005f
 #define VEHICLE_LINE_FOLLOW_KD               0.00005f
 
-/* 误差减速比例。0=不减速，1=最大误差时降到 MIN_SPEED。 */
-#define VEHICLE_LINE_FOLLOW_SLOWDOWN_GAIN    0.70f
+/* 中心探头锁线策略：
+ *   CENTER_MASK 指向中间探头（TRACK_3）。
+ *   中心探头已压线且误差很小时，缩小转向输出，减少左右摆动。
+ *   只要中心探头未压线，就进入固定方向找线，直到 TRACK_3 重新检测到黑线。 */
+#define VEHICLE_LINE_FOLLOW_CENTER_MASK      (1U << 2)
+#define VEHICLE_LINE_FOLLOW_CENTER_DEADBAND  300
+#define VEHICLE_LINE_FOLLOW_CENTER_STEER_SCALE 0.35f
 
-/* 丢线处理：
- *   HOLD_MS 内沿用最后一次误差，避免传感器短暂抖动导致急停。
- *   超过 HOLD_MS 后低速按最后方向找线；超过 STOP_MS 仍未找回则停车。 */
-#define VEHICLE_LINE_FOLLOW_LOST_HOLD_MS     120U
-#define VEHICLE_LINE_FOLLOW_LOST_STOP_MS     600U
-#define VEHICLE_LINE_FOLLOW_SEARCH_SPEED_MPS 0.12f
-#define VEHICLE_LINE_FOLLOW_SEARCH_STEER_DEG 18.0f
+/* 误差减速比例。0=不减速，1=最大误差时降到 MIN_SPEED。 */
+#define VEHICLE_LINE_FOLLOW_SLOWDOWN_GAIN    0.85f
+
+/* 中心找线处理：
+ *   线较窄且探头间距较大时，黑线可能短暂落在两个探头中间，表现为全白。
+ *   TRACK_3 未压线时，按锁存方向低速前进；方向不明确时随机选一侧。
+ *   如果传感器依次扫过 TRACK_2→TRACK_1 或 TRACK_4→TRACK_5，判定为急转弯，舵机直接打满。
+ *   只有 TRACK_3 重新检测到黑线，才退出找线并恢复正常循迹。 */
+#define VEHICLE_LINE_FOLLOW_SEARCH_SPEED_MPS 0.25f
+#define VEHICLE_LINE_FOLLOW_SEARCH_STEER_DEG 22.0f
+#define VEHICLE_LINE_FOLLOW_LOST_MIN_ERROR   250
+
+/* 方向不唯一兜底：
+ *   例如从直线中间偏出时，可能出现两个探头对称在线、error=0 且没有历史偏差。
+ *   此时随机生成一个等效误差，让舵机先打一边，避免卡在中位不响应。 */
+#define VEHICLE_LINE_FOLLOW_AMBIGUOUS_ERROR  600
 
 /* ══════════════════════════════════════════════════════════════
  * 第 4 类：舵机标定（bsp_servo + Motion 共用）

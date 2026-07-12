@@ -1,11 +1,12 @@
 /* ────────────────────────────────────────────────────────────
  * LED 状态服务（HMI 域内部使用）
  *
- * 根据 pool->mode 更新 4 个 LED 的显示策略：
+ * 根据 pool->mode / pool->auto_task 更新 4 个 LED 的显示策略：
  *
  *   STOP:       STATE_LED 每 500ms 翻转（快闪），其余灭
- *   MANUAL:     LED1 + STATE_LED 常亮，其余灭
- *   LINE_FOLLOW: LED1 + LED2 常亮，其余灭
+ *   MANUAL:     LED1 常亮，其余灭
+ *   LINE_FOLLOW: LED2 常亮，其余灭
+ *   K230循线:    LED3 常亮，其余灭
  *   AVOIDANCE:  LED3 每 500ms 翻转（快闪），其余灭
  *   INSPECTION: LED3 常亮，其余灭
  *   ERROR:      LED1~3 + STATE_LED 全部每 500ms 翻转（全闪）
@@ -39,13 +40,13 @@ void LedService_Update(SystemStatePool *pool)
         BspLed_Set(BSP_LED_1,     true);
         BspLed_Set(BSP_LED_2,     false);
         BspLed_Set(BSP_LED_3,     false);
-        BspLed_Set(BSP_LED_STATE, true);
+        BspLed_Set(BSP_LED_STATE, false);
         break;
 
     case SYS_MODE_LINE_FOLLOW:
-        BspLed_Set(BSP_LED_1,     true);
-        BspLed_Set(BSP_LED_2,     true);
-        BspLed_Set(BSP_LED_3,     false);
+        BspLed_Set(BSP_LED_1,     false);
+        BspLed_Set(BSP_LED_2,     pool->auto_task == AUTO_TASK_LINE_FOLLOW);
+        BspLed_Set(BSP_LED_3,     pool->auto_task == AUTO_TASK_LINE_FOLLOW_K230);
         BspLed_Set(BSP_LED_STATE, false);
         break;
 
