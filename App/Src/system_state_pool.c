@@ -49,7 +49,6 @@ void SystemStatePool_Init(SystemStatePool *pool)
     pool->fault.heartbeat_lost           = false;
     pool->fault.obstacle_too_close       = false;
     pool->fault.sensor_invalid           = false;
-    pool->fault.motor_stall              = false;
     pool->fault.servo_limit              = false;
     pool->fault.emergency_stop           = false;
     pool->comm.bt_command.type            = BT_COMMAND_NONE;

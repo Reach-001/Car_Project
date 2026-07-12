@@ -12,23 +12,14 @@
  * 通道定义（按顺序）：
  *   CH1  = mode              （系统模式 0~5）
  *   CH2  = target_body_mps   （目标车身速度 m/s）
- *   CH3  = actual_body_mps   （实际车身速度 m/s，两轮平均）
+ *   CH3  = left_encoder_delta （左编码器 10ms 原始增量）
  *   CH4  = left_target_mps   （左轮目标速度 m/s）
- *   CH5  = left_actual_mps   （左轮实际速度 m/s）
- *   CH6  = left_pwm          （左轮 PWM 千分比）
+ *   CH5  = left_actual_mps   （左轮编码器速度 m/s）
+ *   CH6  = left_pwm_norm     （左轮 PWM，-1~1）
  *   CH7  = right_target_mps  （右轮目标速度 m/s）
- *   CH8  = right_actual_mps  （右轮实际速度 m/s）
- *   CH9  = right_pwm         （右轮 PWM 千分比）
- *   CH10 = fault_mask        （故障码位图）
- *
- *   fault_mask 位定义（bit=1 表示该故障激活）：
- *     bit0 = heartbeat_lost     通信心跳丢失
- *     bit1 = obstacle_too_close 障碍物过近
- *     bit2 = sensor_invalid     传感器无效
- *     bit3 = motor_stall        电机堵转
- *     bit4 = servo_limit        舵机限幅
- *     bit5 = emergency_stop     紧急停车
- *     bit6 = motion_limited     PWM 达到限幅边界
+ *   CH8  = right_actual_mps  （右轮编码器速度 m/s）
+ *   CH9  = right_pwm_norm    （右轮 PWM，-1~1）
+ *   CH10 = right_encoder_delta（右编码器 10ms 原始增量）
  *
  * 帧尾说明：
  *   0x0000807F 在 little-endian float 中 = +∞/NaN 区间的值。
@@ -73,21 +64,6 @@ static void put_float_le(uint8_t *dst, float value)
     dst[3] = (uint8_t)((raw >> 24) & 0xFFU);
 }
 
-/* ── 故障码位图 ── */
-
-static uint16_t build_fault_mask(const SystemStatePool *pool)
-{
-    uint16_t mask = 0U;
-    if (pool->fault.heartbeat_lost)     mask |= (1U << 0);      /* bit0 */
-    if (pool->fault.obstacle_too_close) mask |= (1U << 1);      /* bit1 */
-    if (pool->fault.sensor_invalid)     mask |= (1U << 2);      /* bit2 */
-    if (pool->fault.motor_stall)        mask |= (1U << 3);      /* bit3 */
-    if (pool->fault.servo_limit)        mask |= (1U << 4);      /* bit4 */
-    if (pool->fault.emergency_stop)     mask |= (1U << 5);      /* bit5 */
-    if (pool->motion.limited)           mask |= (1U << 6);      /* bit6 */
-    return mask;
-}
-
 /* ── 100ms 输出任务 ── */
 
 void DebugTrace_Task100ms(SystemStatePool *pool)
@@ -98,17 +74,17 @@ void DebugTrace_Task100ms(SystemStatePool *pool)
     if ((pool == 0) || !pool->debug.enabled || !BspUart_TxDone(BSP_UART_BT))
         return;
 
-    /* 10 个浮点通道，小端序 */
+    /* 10 个浮点通道，小端序。CH3/CH10 输出原始 delta，用于定位编码器计数链路。 */
     put_float_le(&frame[offset], (float)pool->mode);                        offset += 4U;
     put_float_le(&frame[offset], pool->target.speed_mps);                   offset += 4U;
-    put_float_le(&frame[offset], pool->estimation.body_speed_mps);          offset += 4U;
+    put_float_le(&frame[offset], (float)pool->estimation.left_encoder_delta); offset += 4U;
     put_float_le(&frame[offset], pool->motion.left_target_mps);             offset += 4U;
     put_float_le(&frame[offset], pool->estimation.left_speed_mps);          offset += 4U;
-    put_float_le(&frame[offset], (float)pool->motion.left_pwm);             offset += 4U;
+    put_float_le(&frame[offset], (float)pool->motion.left_pwm / 1000.0f);    offset += 4U;
     put_float_le(&frame[offset], pool->motion.right_target_mps);            offset += 4U;
     put_float_le(&frame[offset], pool->estimation.right_speed_mps);         offset += 4U;
-    put_float_le(&frame[offset], (float)pool->motion.right_pwm);            offset += 4U;
-    put_float_le(&frame[offset], (float)build_fault_mask(pool));            offset += 4U;
+    put_float_le(&frame[offset], (float)pool->motion.right_pwm / 1000.0f);   offset += 4U;
+    put_float_le(&frame[offset], (float)pool->estimation.right_encoder_delta); offset += 4U;
 
     /* 帧尾 */
     frame[offset++] = DEBUG_FRAME_TAIL0;

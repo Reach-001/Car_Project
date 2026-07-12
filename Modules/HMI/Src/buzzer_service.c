@@ -5,7 +5,6 @@
  *
  * 映射：
  *   obstacle_too_close → OBSTACLE 急促提示音（连续）
- *   motor_stall        → ERROR 提示音
  *   emergency_stop     → ERROR 提示音
  *   mode 刚切换 → START 提示音（由 Decision 的 mode 变化触发）等后续扩展
  * ──────────────────────────────────────────────────────────── */
@@ -26,7 +25,7 @@ void BuzzerService_Update(SystemStatePool *pool)
             BspBuzzer_Play(BUZZER_PATTERN_OBSTACLE);
         }
     }
-    else if (pool->fault.emergency_stop || pool->fault.motor_stall)
+    else if (pool->fault.emergency_stop)
     {
         if (!BspBuzzer_IsActive())
         {

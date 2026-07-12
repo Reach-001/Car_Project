@@ -22,12 +22,12 @@
 #define VEHICLE_DEG_TO_RAD              0.01745329252f
 
 /* 车身最大允许线速度（m/s），前进和后退对称。实车先设 1.0，稳了再逐步提高 */
-#define VEHICLE_MAX_SPEED_MPS           2.0f
+#define VEHICLE_MAX_SPEED_MPS           1.50f
 
 /* 前轮三点标定（单位：度）
- *   CENTER = 轮子居中时的机械角
- *   LEFT   = 最左机械角
- *   RIGHT  = 最右机械角
+ *   CENTER = 居中修正量。0° 对应舵机实际约 90°，改为 1° 表示在 90° 基础上加 1° 修正。
+ *   LEFT   = 相对居中位置的最左机械角
+ *   RIGHT  = 相对居中位置的最右机械角
  *
  * 蓝牙输入角度线性映射：
  *   蓝牙发  0° → 轮子居中
@@ -35,17 +35,17 @@
  *   蓝牙发 -INPUT_MAX° → 轮子打 LEFT_MAX_DEG
  * 超出 INPUT_MAX 的角度被 clamp 到机械极限，不会顶死。
  *
- * 改 LEFT/RIGHT_MAX_DEG 三个数即可完成转向标定。 */
-#define VEHICLE_STEER_CENTER_DEG        0.0f           /* 居中角（度）        */
-#define VEHICLE_STEER_LEFT_MAX_DEG     -28.0f          /* 最左机械角（度）     */
-#define VEHICLE_STEER_RIGHT_MAX_DEG     28.0f          /* 最右机械角（度）     */
+ * 舵机实际输出角 = CENTER + 目标转向角。 */
+#define VEHICLE_STEER_CENTER_DEG        2.0f           /* 居中修正量（度）     */
+#define VEHICLE_STEER_LEFT_MAX_DEG     -28.0f          /* 相对居中的最左角     */
+#define VEHICLE_STEER_RIGHT_MAX_DEG     28.0f          /* 相对居中的最右角     */
 
 /* 蓝牙输入角度最大值（度）。与机械极限一致，保证线性映射到边界 */
 #define VEHICLE_MANUAL_INPUT_MAX_DEG    45.0f           /* 蓝牙输入±45° → 轮子打满 */
 
-/* 由标定导出的控制限幅（弧度） */
-#define VEHICLE_STEER_LEFT_CMD_LIMIT_RAD   ((VEHICLE_STEER_CENTER_DEG - VEHICLE_STEER_LEFT_MAX_DEG) * VEHICLE_DEG_TO_RAD)
-#define VEHICLE_STEER_RIGHT_CMD_LIMIT_RAD  ((VEHICLE_STEER_RIGHT_MAX_DEG - VEHICLE_STEER_CENTER_DEG) * VEHICLE_DEG_TO_RAD)
+/* 由相对居中角导出的控制限幅（弧度）。CENTER 只修正舵机输出，不改变控制命令范围。 */
+#define VEHICLE_STEER_LEFT_CMD_LIMIT_RAD   ((0.0f - VEHICLE_STEER_LEFT_MAX_DEG) * VEHICLE_DEG_TO_RAD)
+#define VEHICLE_STEER_RIGHT_CMD_LIMIT_RAD  (VEHICLE_STEER_RIGHT_MAX_DEG * VEHICLE_DEG_TO_RAD)
 
 /* ══════════════════════════════════════════════════════════════
  * 第 2 类：车辆几何 / 阿克曼模型（Motion 域使用）
@@ -65,12 +65,28 @@
  * 第 3 类：巡线控制参数（Decision 域使用）
  * ══════════════════════════════════════════════════════════════ */
 
-/* 巡线模式固定速度（m/s）。第一版从低速开始，确认稳定后再提高 */
-#define VEHICLE_LINE_FOLLOW_SPEED_MPS    0.80f
+/* 巡线基础速度（m/s）。该值是直线段目标速度，弯道会按误差自动降速。 */
+#define VEHICLE_LINE_FOLLOW_SPEED_MPS        0.80f
+
+/* 巡线弯道最低速度（m/s）。误差越大速度越接近该值，避免大弯冲出线。 */
+#define VEHICLE_LINE_FOLLOW_MIN_SPEED_MPS    0.20f
 
 /* 循迹误差到转向角的比例。track_error 范围约 -2000~+2000。
- * 负误差 → 左转，正误差 → 右转。 */
-#define VEHICLE_LINE_FOLLOW_KP           0.0005f
+ * STEER_SIGN 用于适配传感器安装方向：方向反了只改 +1/-1。 */
+#define VEHICLE_LINE_FOLLOW_STEER_SIGN       1.0f
+#define VEHICLE_LINE_FOLLOW_KP               0.0005f
+#define VEHICLE_LINE_FOLLOW_KD               0.00005f
+
+/* 误差减速比例。0=不减速，1=最大误差时降到 MIN_SPEED。 */
+#define VEHICLE_LINE_FOLLOW_SLOWDOWN_GAIN    0.70f
+
+/* 丢线处理：
+ *   HOLD_MS 内沿用最后一次误差，避免传感器短暂抖动导致急停。
+ *   超过 HOLD_MS 后低速按最后方向找线；超过 STOP_MS 仍未找回则停车。 */
+#define VEHICLE_LINE_FOLLOW_LOST_HOLD_MS     120U
+#define VEHICLE_LINE_FOLLOW_LOST_STOP_MS     600U
+#define VEHICLE_LINE_FOLLOW_SEARCH_SPEED_MPS 0.12f
+#define VEHICLE_LINE_FOLLOW_SEARCH_STEER_DEG 18.0f
 
 /* ══════════════════════════════════════════════════════════════
  * 第 4 类：舵机标定（bsp_servo + Motion 共用）
@@ -126,13 +142,13 @@
  * ══════════════════════════════════════════════════════════════ */
 
 /* 比例增益 Kp。           单位：PWM‰ / (m/s)。P 太大 → 振荡；P 太小 → 响应慢 */
-#define VEHICLE_SPEED_PI_KP              280.0f
+#define VEHICLE_SPEED_PI_KP              220.0f
 
 /* 积分增益 Ki。           单位：PWM‰ / (m/s*秒)。默认关闭（I_ENABLE=0） */
 #define VEHICLE_SPEED_PI_KI              30.0f
 
 /* 是否启用积分项。        0 = 仅前馈+P；1 = 前馈+P+I。先跑稳 P 再开 I */
-#define VEHICLE_SPEED_PI_I_ENABLE        1
+#define VEHICLE_SPEED_PI_I_ENABLE        0
 
 /* 积分饱和上限。          防止积分量无限制累加导致超调。正负对称 */
 #define VEHICLE_SPEED_PI_I_MAX           80.0f
@@ -140,13 +156,23 @@
 /* 目标死区（m/s）。       目标速度绝对值 < 此值 → 直接停车（防零速抖动） */
 #define VEHICLE_SPEED_PI_TARGET_DEADBAND 0.01f
 
+/* PWM 斜率限制。每 10ms 最大变化量，抑制 PI 输出突跳。
+ * 0,0 刹车不受该限制，仍会立即停车。 */
+#define VEHICLE_MOTOR_PWM_SLEW_PER_10MS 30
+
+/* 起步助推。目标从 0 进入非零时短时间给较高 PWM，越过静摩擦后回到速度环。
+ * 不作为堵转保护使用，只解决低速命令下 PWM 逐步爬升过慢导致的起步失败。 */
+#define VEHICLE_MOTOR_START_ACTUAL_MAX_MPS 0.08f
+#define VEHICLE_MOTOR_START_BOOST_PWM      900
+#define VEHICLE_MOTOR_START_BOOST_MS       160U
+
 /* 前馈最小启动 PWM。      克服静摩擦所需的最小 PWM 占空比。
  * 标定方法：手动发逐步加大 PWM 直到轮子刚好平滑转动，记录该 PWM 值。 */
-#define VEHICLE_SPEED_PI_FF_MIN_PWM      480.0f
+#define VEHICLE_SPEED_PI_FF_MIN_PWM      560.0f
 
 /* 前馈速度斜率。           每增加 1m/s 目标速度，前馈 PWM 增加多少。
  * 标定方法：开环跑不同速度（关 KP、关 KI），记录 PWM 和实际速度，拟合斜率。 */
-#define VEHICLE_SPEED_PI_FF_GAIN_PWM_PER_MPS 100.0f
+#define VEHICLE_SPEED_PI_FF_GAIN_PWM_PER_MPS 140.0f
 
 /* ══════════════════════════════════════════════════════════════
  * 第 7 类：调试步进

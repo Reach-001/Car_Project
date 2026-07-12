@@ -16,7 +16,7 @@
  *   Comm       → pool->comm / pool->event.bt_command_ready / k230_result_ready
  *   HMI        → pool->event.key_* + 控制 BSP LED/蜂鸣器
  *   Decision   → pool->mode / pool->target（唯一能写 target 的域）
- *   Motion     → pool->motion / pool->fault.motor_stall / servo_limit
+ *   Motion     → pool->motion / pool->fault.servo_limit
  *   Debug      → pool->debug
  *
  * event 是一次性的，本周期消费者消费后调用 ClearCycleEvents 清除。
@@ -172,7 +172,6 @@ typedef struct
     bool heartbeat_lost;         /* 通信心跳丢失              */
     bool obstacle_too_close;     /* 障碍物过近（紧急）        */
     bool sensor_invalid;         /* 传感器数据无效            */
-    bool motor_stall;            /* 电机堵转                  */
     bool servo_limit;            /* 舵机限幅触发              */
     bool emergency_stop;         /* 急停请求                  */
 } SystemFault;

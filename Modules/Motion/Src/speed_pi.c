@@ -37,11 +37,14 @@
 static const float OUTPUT_MAX = 1000.0f;
 
 static float s_integral[2];          /* 左(0) 右(1) 积分累加器 */
+static float s_last_target[2];       /* 用于识别启停和换向，避免积分沿用旧工况 */
 
 void SpeedPi_Init(void)
 {
     s_integral[0] = 0.0f;
     s_integral[1] = 0.0f;
+    s_last_target[0] = 0.0f;
+    s_last_target[1] = 0.0f;
 }
 
 int16_t SpeedPi_Compute(int motor_id, float target, float actual)
@@ -53,8 +56,16 @@ int16_t SpeedPi_Compute(int motor_id, float target, float actual)
         (target <  VEHICLE_SPEED_PI_TARGET_DEADBAND))
     {
         s_integral[motor_id] = 0.0f;
+        s_last_target[motor_id] = 0.0f;
         return 0;
     }
+
+    if (((s_last_target[motor_id] <= 0.0f) && (target > 0.0f)) ||
+        ((s_last_target[motor_id] >= 0.0f) && (target < 0.0f)))
+    {
+        s_integral[motor_id] = 0.0f;
+    }
+    s_last_target[motor_id] = target;
 
     float error      = target - actual;
     float abs_target = (target < 0.0f) ? -target : target;
