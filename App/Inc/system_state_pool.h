@@ -104,6 +104,7 @@ typedef enum
     BT_COMMAND_START_TASK,
     BT_COMMAND_PAUSE_TASK,
     BT_COMMAND_DEBUG_OUTPUT,
+    BT_COMMAND_START_TEST,
     BT_COMMAND_CUSTOM
 } BtCommandType;
 
@@ -127,7 +128,7 @@ typedef enum
     K230_RESULT_CMD_STOP,       /* S:n，停车 n 秒              */
     K230_RESULT_CMD_SPEED,      /* V:n，视觉限速/恢复速度       */
     K230_RESULT_CMD_PARK,       /* P:n，1=倒车入库，2=侧方停车  */
-    K230_RESULT_CMD_TURN        /* L/R:n，value0=-1左/+1右      */
+    K230_RESULT_CMD_TURN        /* L/R:n，value0=-1左/+1右，value1=角度 */
 } K230ResultType;
 
 typedef struct

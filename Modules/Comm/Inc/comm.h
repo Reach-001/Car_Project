@@ -41,6 +41,9 @@ void Comm_Task20ms(SystemStatePool *pool);
 
 CommState Comm_GetState(void);
 
+/* 2/3/4横杆触发后调用，授权K230上报一次最近识别结果。 */
+bool Comm_RequestK230Detect(void);
+
 /* ── 命令注入（App 层使用） ── */
 
 typedef struct

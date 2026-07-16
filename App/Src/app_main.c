@@ -86,6 +86,14 @@ void App_Run(void)
     return;
 #endif
 
+    if (AppTest_RuntimeActive())
+    {
+        HAL_IWDG_Refresh(&hiwdg);
+        AppTest_RuntimePollCommand();
+        AppTest_RuntimeRun();
+        return;
+    }
+
     g_state.tick_ms = HAL_GetTick();
     Scheduler_Run(g_state.tick_ms);
 }

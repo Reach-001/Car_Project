@@ -43,9 +43,13 @@ void Comm_Task20ms(SystemStatePool *pool)
     BtCommand bt_cmd;
     if (BtLink_TakeCommand(&bt_cmd))
     {
-        if (bt_cmd.type == BT_COMMAND_DEBUG_OUTPUT)
+        if ((bt_cmd.type == BT_COMMAND_DEBUG_OUTPUT) ||
+            (bt_cmd.type == BT_COMMAND_START_TEST))
         {
-            pool->debug.enabled = (bt_cmd.arg0 != 0);
+            if (bt_cmd.type == BT_COMMAND_DEBUG_OUTPUT)
+            {
+                pool->debug.enabled = (bt_cmd.arg0 != 0);
+            }
             pool->comm.debug_command = bt_cmd;
             s_state.bt_cmd           = bt_cmd;
         }
@@ -78,6 +82,11 @@ void Comm_Task20ms(SystemStatePool *pool)
 CommState Comm_GetState(void)
 {
     return s_state;
+}
+
+bool Comm_RequestK230Detect(void)
+{
+    return K230Link_RequestDetect();
 }
 
 void Comm_SetCommand(const CommCommand *cmd)

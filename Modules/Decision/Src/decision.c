@@ -21,6 +21,7 @@
 
 #include "decision.h"
 
+#include "comm.h"
 #include "vehicle_config.h"
 #include "stm32g4xx_hal.h"     /* HAL_GetTick */
 
@@ -28,6 +29,7 @@
 #define LINE_TRACK_2_MASK   (1U << 1)
 #define LINE_TRACK_4_MASK   (1U << 3)
 #define LINE_TRACK_5_MASK   (1U << 4)
+#define K230_REQUEST_TIMEOUT_MS 1000U
 
 typedef void (*DecisionModeTargetFn)(const SystemStatePool *pool,
                                      float *speed,
@@ -39,25 +41,75 @@ typedef struct
     DecisionModeTargetFn target_fn;
 } DecisionModeHandler;
 
-typedef enum
+typedef struct
 {
-    K230_AUTO_PARK_NONE = 0,
-    K230_AUTO_PARK_REVERSE = 1,
-    K230_AUTO_PARK_PARALLEL = 2
-} K230AutoParkMode;
+    float speed_mps;
+    float steer_rad;
+    uint32_t duration_ms;
+} DecisionParkStep;
+
+typedef struct
+{
+    DecisionParkAction action;
+    uint8_t step;
+    uint32_t step_enter_ms;
+    bool active;
+    bool done;
+} DecisionParkState;
+
+typedef struct
+{
+    K230ResultType type;
+    int16_t value0;
+    int16_t value1;
+    uint32_t timestamp_ms;
+    bool valid;
+} PendingK230Task;
 
 static DecisionState s_state;
 static int16_t       s_line_last_error;
 static int16_t       s_line_last_search_error;
 static uint32_t      s_line_random_state;
 static uint32_t      s_k230_stop_until_ms;
+static uint32_t      s_k230_task_cooldown_until_ms;
+static uint32_t      s_k230_mark_stable_until_ms;
 static float         s_k230_speed_limit_mps;
+static float         s_k230_turn_steer_rad;
 static uint8_t       s_line_last_track_bits;
+static uint8_t       s_k230_task_mark_count;
 static int8_t        s_line_hard_turn_dir;
 static int8_t        s_k230_turn_dir;
-static K230AutoParkMode s_k230_park_mode;
+static PendingK230Task s_k230_pending_task;
+static DecisionParkState s_park_state;
 static bool          s_line_has_valid;
+static bool          s_k230_task_mark_blocked;
+static bool          s_k230_mark_stabilizing;
+static bool          s_k230_mark_stable_ready;
 static bool          s_k230_turn_seen_off_center;
+static bool          s_k230_request_waiting;
+static uint32_t      s_k230_request_until_ms;
+
+static const DecisionParkStep s_reverse_park_steps[] =
+{
+    /* 倒车入库：先从横杆点直行前探，再向右后方入库。 */
+    {  0.0f,  0.0f,                                         300U },
+    {  VEHICLE_PARK_SPEED_MPS,  0.0f,                        VEHICLE_REVERSE_PARK_FORWARD_MS },
+    { -VEHICLE_PARK_SPEED_MPS,  VEHICLE_PARK_STEER_DEG * VEHICLE_DEG_TO_RAD, 3800U },
+    { -VEHICLE_PARK_SPEED_MPS,  0.0f,                                         1000U },
+    {  0.0f,  0.0f,                                         300U },
+};
+
+static const DecisionParkStep s_parallel_park_steps[] =
+{
+    /* 侧方停车：先从横杆点直行前探，再向左后方侧方入位。 */
+    {  0.0f,  0.0f,                                         300U },
+    {  VEHICLE_PARK_SPEED_MPS,  0.0f,                        VEHICLE_PARALLEL_PARK_FORWARD_MS },
+    { -VEHICLE_PARK_SPEED_MPS, -VEHICLE_PARK_STEER_DEG * VEHICLE_DEG_TO_RAD, 2300U },
+    { -VEHICLE_PARK_SPEED_MPS,  VEHICLE_PARK_STEER_DEG * VEHICLE_DEG_TO_RAD, 1500U },
+    {  VEHICLE_PARK_SPEED_MPS, -VEHICLE_PARK_STEER_DEG * VEHICLE_DEG_TO_RAD,  1000U },
+    {  VEHICLE_PARK_SPEED_MPS,  0.0f,                                         250U },
+    {  0.0f,  0.0f,                                         300U },
+};
 
 static float clamp(float v, float lo, float hi)
 {
@@ -81,6 +133,225 @@ static float absf_local(float v)
     return (v < 0.0f) ? -v : v;
 }
 
+static void k230_clear_pending_task(void)
+{
+    s_k230_pending_task.type = K230_RESULT_NONE;
+    s_k230_pending_task.value0 = 0;
+    s_k230_pending_task.value1 = 0;
+    s_k230_pending_task.timestamp_ms = 0U;
+    s_k230_pending_task.valid = false;
+}
+
+static void k230_store_pending_task(const K230Result *res)
+{
+    if (res == 0)
+    {
+        return;
+    }
+
+    s_k230_pending_task.type = res->type;
+    s_k230_pending_task.value0 = res->value0;
+    s_k230_pending_task.value1 = res->value1;
+    s_k230_pending_task.timestamp_ms = res->timestamp_ms;
+    s_k230_pending_task.valid = true;
+}
+
+static bool k230_pending_task_expired(uint32_t now_ms)
+{
+    if (!s_k230_pending_task.valid)
+    {
+        return false;
+    }
+
+    return ((uint32_t)(now_ms - s_k230_pending_task.timestamp_ms) >=
+            VEHICLE_K230_PENDING_TIMEOUT_MS);
+}
+
+static bool k230_task_mark_detected(const SystemStatePool *pool, uint32_t now_ms)
+{
+    bool mark_now;
+
+    if ((pool == 0) || !pool->sensor.track_valid)
+    {
+        s_k230_task_mark_count = 0U;
+        return false;
+    }
+
+    if ((s_k230_task_cooldown_until_ms != 0U) &&
+        ((int32_t)(now_ms - s_k230_task_cooldown_until_ms) < 0))
+    {
+        s_k230_task_mark_count = 0U;
+        return false;
+    }
+
+    if ((s_k230_task_cooldown_until_ms != 0U) &&
+        ((int32_t)(now_ms - s_k230_task_cooldown_until_ms) >= 0))
+    {
+        s_k230_task_cooldown_until_ms = 0U;
+    }
+
+    mark_now = ((pool->sensor.track_bits & VEHICLE_K230_TASK_MARK_MASK) ==
+                VEHICLE_K230_TASK_MARK_MASK);
+    if (!mark_now)
+    {
+        s_k230_task_mark_count = 0U;
+        s_k230_task_mark_blocked = false;
+        return false;
+    }
+
+    if (s_k230_task_mark_blocked)
+    {
+        s_k230_task_mark_count = 0U;
+        return false;
+    }
+
+    if (s_k230_task_mark_count < VEHICLE_K230_TASK_MARK_CONFIRM_COUNT)
+    {
+        ++s_k230_task_mark_count;
+    }
+
+    return (s_k230_task_mark_count >= VEHICLE_K230_TASK_MARK_CONFIRM_COUNT);
+}
+
+static void k230_start_mark_stabilize(uint32_t now_ms)
+{
+    s_k230_mark_stabilizing = true;
+    s_k230_mark_stable_ready = false;
+    s_k230_mark_stable_until_ms = now_ms + VEHICLE_K230_MARK_STABLE_MS;
+}
+
+static bool k230_mark_stabilize_active(uint32_t now_ms)
+{
+    if (!s_k230_mark_stabilizing)
+    {
+        return false;
+    }
+
+    if ((int32_t)(now_ms - s_k230_mark_stable_until_ms) < 0)
+    {
+        return true;
+    }
+
+    s_k230_mark_stabilizing = false;
+    s_k230_mark_stable_ready = true;
+    s_k230_mark_stable_until_ms = 0U;
+    return false;
+}
+
+static const DecisionParkStep *decision_park_steps(DecisionParkAction action,
+                                                   uint32_t *count)
+{
+    if (count == 0)
+    {
+        return 0;
+    }
+
+    if (action == DECISION_PARK_REVERSE)
+    {
+        *count = (uint32_t)(sizeof(s_reverse_park_steps) / sizeof(s_reverse_park_steps[0]));
+        return s_reverse_park_steps;
+    }
+    if (action == DECISION_PARK_PARALLEL)
+    {
+        *count = (uint32_t)(sizeof(s_parallel_park_steps) / sizeof(s_parallel_park_steps[0]));
+        return s_parallel_park_steps;
+    }
+
+    *count = 0U;
+    return 0;
+}
+
+void DecisionPark_Start(DecisionParkAction action, uint32_t now_ms)
+{
+    uint32_t count;
+
+    if (decision_park_steps(action, &count) == 0)
+    {
+        DecisionPark_Stop();
+        return;
+    }
+
+    s_park_state.action = action;
+    s_park_state.step = 0U;
+    s_park_state.step_enter_ms = now_ms;
+    s_park_state.active = true;
+    s_park_state.done = false;
+}
+
+void DecisionPark_Stop(void)
+{
+    s_park_state.action = DECISION_PARK_NONE;
+    s_park_state.step = 0U;
+    s_park_state.step_enter_ms = 0U;
+    s_park_state.active = false;
+    s_park_state.done = false;
+}
+
+bool DecisionPark_IsActive(void)
+{
+    return s_park_state.active;
+}
+
+bool DecisionPark_IsDone(void)
+{
+    return s_park_state.done;
+}
+
+bool DecisionPark_ComputeTarget(uint32_t now_ms, float *speed, float *steer)
+{
+    const DecisionParkStep *steps;
+    uint32_t count;
+
+    if (!s_park_state.active || (speed == 0) || (steer == 0))
+    {
+        if (s_park_state.done && (speed != 0) && (steer != 0))
+        {
+            *speed = 0.0f;
+            *steer = 0.0f;
+            return true;
+        }
+        return false;
+    }
+
+    steps = decision_park_steps(s_park_state.action, &count);
+    if ((steps == 0) || (count == 0U))
+    {
+        DecisionPark_Stop();
+        return false;
+    }
+
+    if (s_park_state.step >= count)
+    {
+        s_park_state.step = (uint8_t)(count - 1U);
+    }
+
+    if ((uint32_t)(now_ms - s_park_state.step_enter_ms) >=
+        steps[s_park_state.step].duration_ms)
+    {
+        if ((uint32_t)s_park_state.step + 1U < count)
+        {
+            ++s_park_state.step;
+            s_park_state.step_enter_ms = now_ms;
+        }
+        else
+        {
+            s_park_state.active = false;
+            s_park_state.done = true;
+            *speed = 0.0f;
+            *steer = 0.0f;
+            return true;
+        }
+    }
+
+    *speed = clamp(steps[s_park_state.step].speed_mps,
+                   -VEHICLE_MAX_SPEED_MPS,
+                   VEHICLE_MAX_SPEED_MPS);
+    *steer = clamp(steps[s_park_state.step].steer_rad,
+                   -steer_left_limit_rad(),
+                   steer_right_limit_rad());
+    return true;
+}
+
 static void reset_line_follow_state(void)
 {
     s_line_last_error = 0;
@@ -94,9 +365,19 @@ static void reset_line_follow_state(void)
 static void reset_k230_auto_state(void)
 {
     s_k230_stop_until_ms = 0U;
+    s_k230_task_cooldown_until_ms = 0U;
+    s_k230_mark_stable_until_ms = 0U;
     s_k230_speed_limit_mps = VEHICLE_LINE_FOLLOW_SPEED_MPS;
+    s_k230_turn_steer_rad = 0.0f;
+    s_k230_task_mark_count = 0U;
+    s_k230_task_mark_blocked = false;
+    s_k230_mark_stabilizing = false;
+    s_k230_mark_stable_ready = false;
     s_k230_turn_dir = 0;
-    s_k230_park_mode = K230_AUTO_PARK_NONE;
+    s_k230_request_waiting = false;
+    s_k230_request_until_ms = 0U;
+    k230_clear_pending_task();
+    DecisionPark_Stop();
     s_k230_turn_seen_off_center = false;
 }
 
@@ -413,6 +694,8 @@ static void decision_target_manual(const SystemStatePool *pool,
     *steer = s_state.target_steer_rad;
 }
 
+static bool decision_k230_should_stop(uint32_t now_ms);
+
 static float decision_k230_speed_from_value(int16_t value)
 {
     float speed;
@@ -451,9 +734,23 @@ static void decision_apply_speed_limit(float *speed)
     }
 }
 
+static float decision_k230_turn_steer_from_deg(int8_t turn_dir, int16_t angle_deg)
+{
+    float abs_deg = (angle_deg < 0) ? (float)-angle_deg : (float)angle_deg;
+    float steer = abs_deg * VEHICLE_DEG_TO_RAD;
+
+    if (turn_dir < 0)
+    {
+        return -clamp(steer, 0.0f, steer_left_limit_rad());
+    }
+
+    return clamp(steer, 0.0f, steer_right_limit_rad());
+}
+
 static void decision_consume_k230_command(const SystemStatePool *pool)
 {
     const K230Result *res;
+    uint32_t now_ms;
 
     if ((pool == 0) || !pool->event.k230_result_ready || !pool->comm.k230_result.valid)
     {
@@ -461,46 +758,33 @@ static void decision_consume_k230_command(const SystemStatePool *pool)
     }
 
     res = &pool->comm.k230_result;
+    now_ms = HAL_GetTick();
+
+    /* S:n 是时间锁存停车；停车窗口内忽略 V/L/R/P，避免 K230 连续输出 V:50 立即取消停车。 */
+    if ((res->type != K230_RESULT_CMD_STOP) && decision_k230_should_stop(now_ms))
+    {
+        return;
+    }
+
     if (res->type == K230_RESULT_CMD_STOP)
     {
-        int16_t seconds = (res->value0 < 0) ? 0 : res->value0;
-        s_k230_stop_until_ms = res->timestamp_ms + ((uint32_t)seconds * 1000U);
-        s_k230_turn_dir = 0;
-        s_k230_park_mode = K230_AUTO_PARK_NONE;
-        s_k230_turn_seen_off_center = false;
+        s_k230_request_waiting = false;
+        k230_store_pending_task(res);
     }
     else if (res->type == K230_RESULT_CMD_SPEED)
     {
-        s_k230_speed_limit_mps = decision_k230_speed_from_value(res->value0);
-        s_k230_stop_until_ms = 0U;
-        s_k230_turn_dir = 0;
-        s_k230_park_mode = K230_AUTO_PARK_NONE;
-        s_k230_turn_seen_off_center = false;
+        s_k230_request_waiting = false;
+        k230_store_pending_task(res);
     }
     else if (res->type == K230_RESULT_CMD_TURN)
     {
-        s_k230_turn_dir = (res->value0 < 0) ? -1 : 1;
-        s_k230_stop_until_ms = 0U;
-        s_k230_park_mode = K230_AUTO_PARK_NONE;
-        s_k230_turn_seen_off_center = false;
+        s_k230_request_waiting = false;
+        k230_store_pending_task(res);
     }
     else if (res->type == K230_RESULT_CMD_PARK)
     {
-        if (res->value0 == 1)
-        {
-            s_k230_park_mode = K230_AUTO_PARK_REVERSE;
-        }
-        else if (res->value0 == 2)
-        {
-            s_k230_park_mode = K230_AUTO_PARK_PARALLEL;
-        }
-        else
-        {
-            s_k230_park_mode = K230_AUTO_PARK_NONE;
-        }
-        s_k230_stop_until_ms = 0U;
-        s_k230_turn_dir = 0;
-        s_k230_turn_seen_off_center = false;
+        s_k230_request_waiting = false;
+        k230_store_pending_task(res);
     }
 }
 
@@ -540,13 +824,128 @@ static bool decision_k230_turn_target(const SystemStatePool *pool,
     else if (s_k230_turn_seen_off_center)
     {
         s_k230_turn_dir = 0;
+        s_k230_turn_steer_rad = 0.0f;
         s_k230_turn_seen_off_center = false;
         return false;
     }
 
     *speed = VEHICLE_LINE_FOLLOW_SEARCH_SPEED_MPS;
-    *steer = line_follow_hard_steer_from_dir(s_k230_turn_dir);
+    *steer = s_k230_turn_steer_rad;
     return true;
+}
+
+static bool decision_k230_trigger_pending_task(const SystemStatePool *pool,
+                                               uint32_t now_ms)
+{
+    K230ResultType type;
+    int16_t value0;
+    int16_t value1;
+    bool mark_now;
+    bool request_window_active;
+
+    if (k230_mark_stabilize_active(now_ms))
+    {
+        return true;
+    }
+
+    if (!s_k230_pending_task.valid)
+    {
+        mark_now = k230_task_mark_detected(pool, now_ms);
+        if (!mark_now)
+        {
+            if (s_k230_request_waiting &&
+                ((int32_t)(now_ms - s_k230_request_until_ms) >= 0))
+            {
+                s_k230_request_waiting = false;
+                s_k230_request_until_ms = 0U;
+            }
+            return false;
+        }
+
+        if (!s_k230_request_waiting ||
+            ((int32_t)(now_ms - s_k230_request_until_ms) >= 0))
+        {
+            if (Comm_RequestK230Detect())
+            {
+                s_k230_request_waiting = true;
+                s_k230_request_until_ms = now_ms + K230_REQUEST_TIMEOUT_MS;
+            }
+        }
+
+        k230_start_mark_stabilize(now_ms);
+        return true;
+    }
+
+    if (k230_pending_task_expired(now_ms))
+    {
+        k230_clear_pending_task();
+        s_k230_request_waiting = false;
+        s_k230_request_until_ms = 0U;
+        s_k230_mark_stabilizing = false;
+        s_k230_mark_stable_ready = false;
+        s_k230_mark_stable_until_ms = 0U;
+        return false;
+    }
+
+    mark_now = k230_task_mark_detected(pool, now_ms);
+    request_window_active = s_k230_request_waiting &&
+                            ((int32_t)(now_ms - s_k230_request_until_ms) < 0);
+    if (mark_now && !s_k230_mark_stable_ready)
+    {
+        k230_start_mark_stabilize(now_ms);
+        return true;
+    }
+
+    if (!mark_now && !request_window_active && !s_k230_mark_stable_ready)
+    {
+        return false;
+    }
+
+    s_k230_mark_stable_ready = false;
+
+    type = s_k230_pending_task.type;
+    value0 = s_k230_pending_task.value0;
+    value1 = s_k230_pending_task.value1;
+    k230_clear_pending_task();
+    s_k230_request_waiting = false;
+    s_k230_request_until_ms = 0U;
+    s_k230_task_mark_count = 0U;
+    s_k230_task_mark_blocked = true;
+    s_k230_task_cooldown_until_ms = now_ms + VEHICLE_K230_TASK_COOLDOWN_MS;
+
+    s_k230_stop_until_ms = 0U;
+    s_k230_turn_dir = 0;
+    s_k230_turn_steer_rad = 0.0f;
+    s_k230_turn_seen_off_center = false;
+
+    if (type == K230_RESULT_CMD_STOP)
+    {
+        int16_t seconds = (value0 < 0) ? 0 : value0;
+        s_k230_stop_until_ms = now_ms + ((uint32_t)seconds * 1000U);
+    }
+    else if (type == K230_RESULT_CMD_SPEED)
+    {
+        s_k230_speed_limit_mps = decision_k230_speed_from_value(value0);
+    }
+    else if (type == K230_RESULT_CMD_TURN)
+    {
+        s_k230_turn_dir = (value0 < 0) ? -1 : 1;
+        s_k230_turn_steer_rad = decision_k230_turn_steer_from_deg(s_k230_turn_dir,
+                                                                  value1);
+    }
+    else if (type == K230_RESULT_CMD_PARK)
+    {
+        if (value0 == 1)
+        {
+            DecisionPark_Start(DECISION_PARK_REVERSE, now_ms);
+        }
+        else if (value0 == 2)
+        {
+            DecisionPark_Start(DECISION_PARK_PARALLEL, now_ms);
+        }
+    }
+
+    return false;
 }
 
 static void decision_target_line_follow(const SystemStatePool *pool,
@@ -564,11 +963,22 @@ static void decision_target_line_follow(const SystemStatePool *pool,
     if (pool->auto_task == AUTO_TASK_LINE_FOLLOW_K230)
     {
         decision_consume_k230_command(pool);
-        if (decision_k230_should_stop(HAL_GetTick()) ||
-            (s_k230_park_mode != K230_AUTO_PARK_NONE))
+        if (!DecisionPark_IsActive() &&
+            decision_k230_trigger_pending_task(pool, HAL_GetTick()))
         {
             *speed = 0.0f;
             *steer = 0.0f;
+            return;
+        }
+        if (!DecisionPark_IsActive() &&
+            decision_k230_should_stop(HAL_GetTick()))
+        {
+            *speed = 0.0f;
+            *steer = 0.0f;
+            return;
+        }
+        if (DecisionPark_ComputeTarget(HAL_GetTick(), speed, steer))
+        {
             return;
         }
         if (decision_k230_turn_target(pool, speed, steer))

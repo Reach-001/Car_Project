@@ -30,6 +30,31 @@
 /* K230 限速指令的最低运行速度（m/s）。V:10 用于限速通行，不复用找线速度。 */
 #define VEHICLE_K230_MIN_SPEED_MPS      0.20f
 
+/* K230 任务触发横杆：循迹 2/3/4 号探头同时检测到黑线，表示到达精确执行点。 */
+#define VEHICLE_K230_TASK_MARK_MASK     ((1U << 1) | (1U << 2) | (1U << 3))
+
+/* 横杆确认帧数。Decision 20ms 调用一次，3 帧约 60ms，可过滤偶发误读。 */
+#define VEHICLE_K230_TASK_MARK_CONFIRM_COUNT 1U
+
+/* K230 任务预告有效时间（ms）。摄像头提前识别后，超时还没扫到横杆则丢弃。 */
+#define VEHICLE_K230_PENDING_TIMEOUT_MS 5000U
+
+/* 任务执行触发后的冷却时间（ms）。防止车还压在横杆上时重复触发。 */
+#define VEHICLE_K230_TASK_COOLDOWN_MS   1000U
+
+/* 扫到任务横杆后先停车稳定识别的时间（ms）。用于降低 K230 动态识别误差。 */
+#define VEHICLE_K230_MARK_STABLE_MS     800U
+
+/* 泊车动作开环速度（m/s）。先用低速，保证倒车入库/侧方停车测试时有足够反应时间。 */
+#define VEHICLE_PARK_SPEED_MPS          0.26f
+
+/* 泊车动作转向角（度）。正=右转，负=左转，最终会被机械限幅夹住。 */
+#define VEHICLE_PARK_STEER_DEG          30.0f
+
+/* 泊车触发后先直行的时间（ms）。用于从横杆精确点前探到更合适的入库/侧方起点。 */
+#define VEHICLE_REVERSE_PARK_FORWARD_MS 2150U    //
+#define VEHICLE_PARALLEL_PARK_FORWARD_MS 900U
+
 /* 前轮三点标定（单位：度）
  *   CENTER = 居中修正量。0° 对应舵机实际约 90°，改为 1° 表示在 90° 基础上加 1° 修正。
  *   LEFT   = 相对居中位置的最左机械角
@@ -43,8 +68,8 @@
  *
  * 舵机实际输出角 = CENTER + 目标转向角。 */
 #define VEHICLE_STEER_CENTER_DEG        0.9f           /* 居中修正量（度）     */
-#define VEHICLE_STEER_LEFT_MAX_DEG     -30.0f          /* 相对居中的最左角     */
-#define VEHICLE_STEER_RIGHT_MAX_DEG     34.0f          /* 相对居中的最右角     */
+#define VEHICLE_STEER_LEFT_MAX_DEG     -28.0f          /* 相对居中的最左角     */
+#define VEHICLE_STEER_RIGHT_MAX_DEG     33.0f          /* 相对居中的最右角     */
 
 /* 蓝牙输入角度最大值（度）。与机械极限一致，保证线性映射到边界 */
 #define VEHICLE_MANUAL_INPUT_MAX_DEG    45.0f           /* 蓝牙输入±45° → 轮子打满 */
@@ -65,10 +90,10 @@
 
 /* 阿克曼模型允许的最大左右轮速比例差。
  * 例如 0.60 表示内外轮速度最多相差 ±60%，防止大角度时内侧轮目标速度过小或反向。 */
-#define VEHICLE_ACKERMANN_RATIO_LIMIT   0.60f
+#define VEHICLE_ACKERMANN_RATIO_LIMIT   0.75f
 
 /* 转弯内轮最小目标速度（m/s）。低于该值时实车内轮容易卡在静摩擦区。 */
-#define VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS 0.25f
+#define VEHICLE_ACKERMANN_INNER_MIN_SPEED_MPS 0.23f
 
 /* ══════════════════════════════════════════════════════════════
  * 第 3 类：巡线控制参数（Decision 域使用）
@@ -83,11 +108,11 @@
 
 /* 五路循迹权重（从左到右 TRACK_1~5）。
  * 权重表示黑线相对车体中心的位置误差，不是舵机角度；Decision 再用 KP/KD 换算成转向角。 */
-#define VEHICLE_TRACK_WEIGHT_1              -1000
+#define VEHICLE_TRACK_WEIGHT_1              -1600
 #define VEHICLE_TRACK_WEIGHT_2              -300
 #define VEHICLE_TRACK_WEIGHT_3                  0
 #define VEHICLE_TRACK_WEIGHT_4               300
-#define VEHICLE_TRACK_WEIGHT_5               1000
+#define VEHICLE_TRACK_WEIGHT_5               1600
 
 /* 巡线基础速度（m/s）。实车标定阶段先低速，确认不跑出赛道后再逐步提高。 */
 #define VEHICLE_LINE_FOLLOW_SPEED_MPS        0.45f
@@ -200,9 +225,9 @@
 
 /* 起步助推。目标从 0 进入非零时短时间给较高 PWM，越过静摩擦后回到速度环。
  * 不作为堵转保护使用，只解决低速命令下 PWM 逐步爬升过慢导致的起步失败。 */
-#define VEHICLE_MOTOR_START_ACTUAL_MAX_MPS 0.08f
-#define VEHICLE_MOTOR_START_BOOST_PWM      900
-#define VEHICLE_MOTOR_START_BOOST_MS       160U
+#define VEHICLE_MOTOR_START_ACTUAL_MAX_MPS 0.08f   // 0.08m/s
+#define VEHICLE_MOTOR_START_BOOST_PWM      600     // 600
+#define VEHICLE_MOTOR_START_BOOST_MS       160U    // 160ms
 
 /* 前馈最小启动 PWM。      克服静摩擦所需的最小 PWM 占空比。
  * 标定方法：手动发逐步加大 PWM 直到轮子刚好平滑转动，记录该 PWM 值。 */

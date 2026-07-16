@@ -65,8 +65,18 @@ static uint32_t steer_to_compare(int16_t steer_permille)
 
 bool BspServo_Init(void)
 {
+    HAL_StatusTypeDef status;
+
     s_steer_permille = 0;
-    s_available = (HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3) == HAL_OK);
+
+    if (!s_available)
+    {
+        status = HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+        /* 正常 App 已启动 PWM 后，运行时 TEST,5 会再次初始化舵机。
+         * HAL_BUSY 表示通道已在输出，不能因此把舵机标为不可用。 */
+        s_available = (status == HAL_OK) || (status == HAL_BUSY);
+    }
+
     BspServo_SetSteerPermille(0);       /* 上电归中位 */
     return s_available;
 }

@@ -34,6 +34,13 @@ typedef struct
     float      target_steer_rad;
 } DecisionState;
 
+typedef enum
+{
+    DECISION_PARK_NONE = 0,
+    DECISION_PARK_REVERSE = 1,   /* 倒车入库 */
+    DECISION_PARK_PARALLEL = 2   /* 侧方停车 */
+} DecisionParkAction;
+
 /* ── 生命周期 ── */
 
 void Decision_Init(void);
@@ -42,5 +49,11 @@ void Decision_Init(void);
 void Decision_Task20ms(SystemStatePool *pool);
 
 DecisionState Decision_GetState(void);
+
+void DecisionPark_Start(DecisionParkAction action, uint32_t now_ms);
+void DecisionPark_Stop(void);
+bool DecisionPark_IsActive(void);
+bool DecisionPark_IsDone(void);
+bool DecisionPark_ComputeTarget(uint32_t now_ms, float *speed, float *steer);
 
 #endif /* DECISION_H */

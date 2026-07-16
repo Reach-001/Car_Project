@@ -13,6 +13,7 @@
 
 #include "app_tasks.h"
 
+#include "app_test.h"
 #include "system_state_pool.h"
 #include "sensor_domain.h"
 #include "estimation.h"
@@ -61,6 +62,21 @@ static void Task_Comm20ms(void *ctx)
 static void Task_Decision20ms(void *ctx)
 {
     SystemStatePool *pool = (SystemStatePool *)ctx;
+
+    if ((pool->comm.debug_command.type == BT_COMMAND_START_TEST) &&
+        pool->comm.debug_command.valid)
+    {
+        if (pool->comm.debug_command.arg0 == TEST_NONE)
+        {
+            AppTest_RuntimeStop();
+        }
+        else
+        {
+            (void)AppTest_RuntimeStart((uint8_t)pool->comm.debug_command.arg0);
+        }
+        pool->comm.debug_command.valid = false;
+    }
+
     Decision_Task20ms(pool);
     /* 本周期消费者处理完成后，统一清理一次性事件 */
     SystemStatePool_ClearCycleEvents(pool);

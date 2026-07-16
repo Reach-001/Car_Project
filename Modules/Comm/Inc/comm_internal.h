@@ -26,6 +26,7 @@ void BtLink_GetStatus(bool *connected, uint32_t *last_rx_ms, uint32_t *rx_count)
 
 void K230Link_Task(void);
 bool K230Link_GetLatestResult(K230Result *result);
+bool K230Link_RequestDetect(void);
 void K230Link_GetStatus(bool *connected, uint32_t *last_rx_ms, uint32_t *rx_count);
 
 #endif /* COMM_INTERNAL_H */

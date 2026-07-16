@@ -10,6 +10,7 @@
  * 控制命令：
  *   STOP
  *   DEBUG,0 / DEBUG,1
+ *   TEST,0~11（0=退出运行时测试，10=倒车入库，11=侧方停车）
  *
  * 系统默认就是手动模式，发送 speed,angle 即可更新手动目标；
  * 未收到新的 speed,angle 时，Decision 会保持上一组目标。
@@ -181,6 +182,44 @@ static bool parse_auto_command(const char *line, int16_t *task_id)
     return true;
 }
 
+static bool parse_test_command(const char *line, int16_t *test_id)
+{
+    char *end;
+    long value;
+
+    if ((line == 0) || (test_id == 0))
+    {
+        return false;
+    }
+
+    if (!((to_upper_ascii(line[0]) == 'T') &&
+          (to_upper_ascii(line[1]) == 'E') &&
+          (to_upper_ascii(line[2]) == 'S') &&
+          (to_upper_ascii(line[3]) == 'T') &&
+          (line[4] == ',')))
+    {
+        return false;
+    }
+
+    value = strtol(&line[5], &end, 10);
+    while (*end != '\0' && isspace((unsigned char)*end))
+    {
+        ++end;
+    }
+    if (*end != '\0')
+    {
+        return false;
+    }
+
+    if ((value < 0) || (value > 99))
+    {
+        return false;
+    }
+
+    *test_id = (int16_t)value;
+    return true;
+}
+
 static void set_pending_command(BtCommandType type, int16_t arg0, int16_t arg1, int16_t arg2)
 {
     s_pending.type         = type;
@@ -196,6 +235,7 @@ static void process_line(const char *line)
     int16_t speed;
     int16_t angle;
     int16_t debug_enabled;
+    int16_t test_id;
 
     if (text_equals_ignore_case(line, "STOP"))
     {
@@ -204,6 +244,10 @@ static void process_line(const char *line)
     else if (parse_debug_command(line, &debug_enabled))
     {
         set_pending_command(BT_COMMAND_DEBUG_OUTPUT, debug_enabled, 0, 0);
+    }
+    else if (parse_test_command(line, &test_id))
+    {
+        set_pending_command(BT_COMMAND_START_TEST, test_id, 0, 0);
     }
     else if (parse_auto_command(line, &speed))
     {
